@@ -11,10 +11,18 @@ const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
-const ROOT_DIR = path.dirname(process.pkg ? process.execPath : __dirname);
+const ROOT_DIR = path.join(__dirname, '..');
+// 注: pkg 环境下 __dirname 指向虚拟快照路径，public 资源通过快照访问
+// 需要物理路径用于文件上传和数据存储
+const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 
-const uploadDir = path.join(path.dirname(process.pkg ? process.execPath : __dirname), 'public', 'uploads');
+// ---- 提供首页 ----
+app.get('/', (req, res) => {
+  res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
+});
+
+const uploadDir = path.join(DATA_DIR, 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -368,6 +376,12 @@ app.delete('/api/config/:id', (req, res) => {
 app.get('/api/upgrade-logs', (req, res) => {
   try { const db = getDatabase(); res.json({ success: true, data: db.prepare('SELECT * FROM upgrade_logs ORDER BY created_at DESC').all() }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ---- 兜底：所有未匹配 API 的路由返回 index.html（支持前端路由） ----
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ success: false, message: 'API 不存在' });
+  res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
 });
 
 app.listen(PORT, () => console.log(`需求单信息管理系统已启动: http://localhost:${PORT}`));

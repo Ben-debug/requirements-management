@@ -1,0 +1,18 @@
+{
+  "name": "requirement-manager",
+  "version": "1.0.0",
+  "description": "需求单信息管理系统",
+  "main": "server/index.js",
+  "bin": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "build": "npx pkg . --targets node18-win-x64 --output Release/需求单信息管理系统.exe"
+  },
+  "pkg": {
+    "assets": ["public/**/*"],
+    "targets": ["node18-win-x64"]
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

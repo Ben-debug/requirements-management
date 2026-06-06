@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>需求单信息管理系统</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+  <div class="brand">📋 需求单信息管理 <span>Requirement Order Manager</span></div>
+  <div class="nav-items">
+    <div class="nav-item active" data-page="orders" onclick="navigate('orders')">📄 需求单管理</div>
+    <div class="nav-item" data-page="meetings" onclick="navigate('meetings')">📅 CCB排期管理</div>
+    <div class="nav-item" data-page="schedules" onclick="navigate('schedules')">🔍 排期信息筛选</div>
+    <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
+  </div>
+</nav>
+
+<main class="main-content">
+<!-- Orders Page -->
+<div id="page-orders" class="page-content" style="display:block">
+  <div class="page-header"><h2>📄 需求单管理</h2><p>点击需求单编号查看详情。支持新增、编辑、删除、Excel导入导出</p></div>
+  <div class="toolbar">
+    <input type="text" id="global-search" placeholder="🔍 搜索需求单编号、名称、需求点..." style="min-width:320px">
+    <button class="btn btn-primary" onclick="showCreateOrder()">＋ 新建需求单</button>
+    <button class="btn btn-success" onclick="importExcel()">📥 导入Excel</button>
+    <button class="btn btn-export" onclick="exportExcel()">📤 导出Excel</button>
+    <input type="file" id="import-file" class="hidden-input" accept=".xlsx,.xls">
+  </div>
+  <div id="search-results" class="search-results-container"></div>
+  <div class="table-container">
+    <table id="orders-table"><thead><tr>
+      <th>需求单编号</th><th>名称</th><th>业务部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>操作</th>
+    </tr></thead><tbody><tr><td colspan="7"><div class="loading">加载中...</div></td></tr></tbody></table>
+    <div id="orders-pagination" class="pagination"></div>
+  </div>
+</div>
+
+<!-- Meetings Page -->
+<div id="page-meetings" class="page-content" style="display:none">
+  <div class="page-header"><h2>📅 CCB排期管理</h2><p>管理CCB会议记录，为需求点进行排期</p></div>
+  <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()">＋ 新建CCB会议</button></div>
+  <div id="meetings-list"></div>
+</div>
+
+<!-- Schedules Page -->
+<div id="page-schedules" class="page-content" style="display:none">
+  <div class="page-header"><h2>🔍 排期信息筛选</h2><p>灵活查询排期信息，支持分组显示</p></div>
+  <div class="toolbar">
+    <div class="filter-row">
+      <select id="filter-version"><option value="">全部版本</option></select>
+      <select id="filter-department"><option value="">全部部门</option></select>
+      <select id="filter-meeting"><option value="">全部会议</option></select>
+      <select id="filter-system"><option value="">全部系统</option></select>
+      <button class="btn btn-primary" onclick="applyFilter()">🔍 查询</button>
+      <button class="btn" onclick="resetFilter()">↻ 重置</button>
+      <select id="filter-group" style="margin-left:auto">
+        <option value="version" selected>按版本分组</option>
+        <option value="">不分组</option>
+        <option value="department">按部门分组</option>
+        <option value="meeting">按会议分组</option>
+        <option value="system">按系统分组</option>
+      </select>
+    </div>
+  </div>
+  <div id="schedule-results"></div>
+  <div id="schedules-pagination" class="pagination"></div>
+</div>
+
+<!-- Config Page -->
+<div id="page-config" class="page-content" style="display:none">
+  <div class="page-header"><h2>⚙️ 参数配置</h2><p>管理各类参数的可选值，折叠式布局</p></div>
+  <div class="config-accordion">
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">🏢 业务部门</span>
+        <div><span id="config-department-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-department"></div>
+    </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">🏷️ 上线版本</span>
+        <div><span id="config-version-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-version"></div>
+    </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">📦 涉及改造系统</span>
+        <div><span id="config-system-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-system"></div>
+    </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">📎 流转文件类型</span>
+        <div><span id="config-file_type-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-file_type"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Upgrade Logs Page -->
+<div id="page-upgradelogs" class="page-content" style="display:none">
+  <div class="page-header"><h2>📋 系统升级日志</h2><p>系统更新与版本发布记录，每次重启自动生成</p></div>
+  <div id="upgrade-logs-list"></div>
+</div>
+</main>
+
+<!-- Order Modal -->
+<div id="order-modal" class="modal-overlay"><div class="modal">
+  <div class="modal-header"><h3 id="order-modal-title">新建需求单</h3><button class="modal-close" onclick="closeModal('order-modal')">×</button></div>
+  <form id="order-form"><div class="modal-body">
+    <div class="form-row"><div class="form-group"><label>编号 <span class="required">*</span></label><input type="text" id="order_number" name="order_number" class="form-control" placeholder="1大写字母+2数字（如 A01）" required pattern="[A-Z]\d{2}"><div class="form-hint">1位大写字母+2位数字</div></div>
+    <div class="form-group"><label>名称 <span class="required">*</span></label><input type="text" id="order_name" name="name" class="form-control" required></div></div>
+    <div class="form-row"><div class="form-group"><label>业务部门 <span class="required">*</span></label><select id="department" name="department" class="form-control" required></select></div>
+    <div class="form-group"><label>提出人 <span class="required">*</span></label><input type="text" id="proposer" name="proposer" class="form-control" required></div></div>
+    <div class="form-row"><div class="form-group"><label>提出日期 <span class="required">*</span></label><input type="date" id="propose_date" name="propose_date" class="form-control" required></div>
+    <div class="form-group"><label>上线预期 <span class="required">*</span></label><input type="text" id="business_launch_date" name="business_launch_date" class="form-control" placeholder="日期或文字" required></div></div>
+  </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('order-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
+</div></div>
+
+<!-- Detail Modal -->
+<div id="detail-modal" class="modal-overlay"><div class="modal modal-lg">
+  <div class="modal-header"><h3>需求单详情 - <span id="detail-number"></span></h3><button class="modal-close" onclick="closeModal('detail-modal')">×</button></div>
+  <div class="modal-body">
+    <div class="detail-section"><h4>基本信息</h4>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="label">编号</div><div class="value" id="detail-number-display"></div></div>
+        <div class="detail-item"><div class="label">名称</div><div class="value" id="detail-name"></div></div>
+        <div class="detail-item"><div class="label">部门</div><div class="value" id="detail-department"></div></div>
+        <div class="detail-item"><div class="label">提出人</div><div class="value" id="detail-proposer"></div></div>
+        <div class="detail-item"><div class="label">提出日期</div><div class="value" id="detail-propose-date"></div></div>
+        <div class="detail-item"><div class="label">上线预期</div><div class="value" id="detail-launch-date"></div></div>
+      </div>
+    </div>
+    <div class="detail-section"><h4>需求点详情</h4>
+      <button class="btn btn-primary btn-sm" onclick="showAddPoint()">＋ 添加</button>
+      <div id="detail-points" class="points-list"></div>
+    </div>
+    <div class="detail-section"><h4>流转文件</h4>
+      <div class="form-row" style="margin-bottom:12px">
+        <div class="form-group"><select id="file-type" class="form-control"></select></div>
+        <div class="form-group"><input type="file" id="file-upload" class="form-control"></div>
+        <div class="form-group" style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="uploadFile()">上传</button></div>
+      </div>
+      <div id="detail-files" class="file-list"></div>
+    </div>
+    <input type="hidden" id="detail-order-id">
+  </div>
+</div></div>
+
+<!-- Point Modal -->
+<div id="point-modal" class="modal-overlay"><div class="modal">
+  <div class="modal-header"><h3 id="point-modal-title">添加需求点</h3><button class="modal-close" onclick="closeModal('point-modal')">×</button></div>
+  <form id="point-form"><div class="modal-body"><div class="form-group"><label>描述 <span class="required">*</span></label><textarea id="point-description" name="description" class="form-control" required></textarea></div></div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('point-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
+</div></div>
+
+<!-- Quick Schedule Modal -->
+<div id="quick-schedule-modal" class="modal-overlay"><div class="modal" style="max-width:500px">
+  <div class="modal-header"><h3>排期设置</h3><button class="modal-close" onclick="closeModal('quick-schedule-modal')">×</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>CCB会议 <span class="required">*</span></label><select id="detail-schedule-meeting" class="form-control"></select></div>
+    <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="detail-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
+    <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="detail-schedule-version" class="form-control"></select></div>
+    <input type="hidden" id="schedule-point-id"><input type="hidden" id="schedule-order-id">
+  </div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('quick-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmQuickSchedule()">确认排期</button></div>
+</div></div>
+
+<!-- Meeting Modal -->
+<div id="meeting-modal" class="modal-overlay"><div class="modal">
+  <div class="modal-header"><h3 id="meeting-modal-title">新建CCB会议</h3><button class="modal-close" onclick="closeModal('meeting-modal')">×</button></div>
+  <form id="meeting-form"><div class="modal-body">
+    <div class="form-row"><div class="form-group"><label>会议名称 <span class="required">*</span></label><input type="text" id="meeting_name" name="meeting_name" class="form-control" required></div>
+    <div class="form-group"><label>日期 <span class="required">*</span></label><input type="date" id="meeting_date" name="meeting_date" class="form-control" required></div></div>
+    <div class="form-group"><label>备注</label><textarea id="meeting_notes" name="notes" class="form-control"></textarea></div>
+    <div class="form-group"><label>纪要文件</label><div class="form-row"><input type="file" id="meeting-file-upload" class="form-control"><button type="button" class="btn btn-primary" onclick="uploadMeetingFile()">上传</button></div></div>
+  </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('meeting-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
+</div></div>
+
+<!-- Schedule Modal -->
+<div id="schedule-modal" class="modal-overlay"><div class="modal modal-lg">
+  <div class="modal-header"><h3>排期管理 - <span id="schedule-meeting-name"></span></h3><button class="modal-close" onclick="closeModal('schedule-modal')">×</button></div>
+  <div class="modal-body">
+    <div class="detail-section"><h4>会议信息</h4>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="label">名称</div><div class="value" id="schedule-meeting-name-display"></div></div>
+        <div class="detail-item"><div class="label">日期</div><div class="value" id="schedule-meeting-date"></div></div>
+        <div class="detail-item"><div class="label">备注</div><div class="value" id="schedule-meeting-notes"></div></div>
+        <div class="detail-item"><div class="label">纪要</div><div class="value" id="schedule-meeting-file"></div></div>
+      </div>
+    </div>
+    <div class="detail-section"><h4>批量排期（仅待排期）</h4>
+      <p style="font-size:13px;color:#999;margin-bottom:12px">勾选需求点，逐行选择系统和版本后保存</p>
+      <div id="schedule-batch-table" style="border:1px solid #d9d9d9;border-radius:6px;padding:8px;overflow-x:auto"><div class="loading">加载中...</div></div>
+    </div>
+    <div class="detail-section"><h4>已排期列表</h4><div id="schedule-list"></div></div>
+    <input type="hidden" id="schedule-meeting-id">
+  </div>
+</div></div>
+
+<!-- Edit Schedule Modal -->
+<div id="edit-schedule-modal" class="modal-overlay"><div class="modal" style="max-width:450px">
+  <div class="modal-header"><h3>修改排期</h3><button class="modal-close" onclick="closeModal('edit-schedule-modal')">×</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>CCB会议</label><select id="edit-schedule-meeting" class="form-control"></select></div>
+    <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="edit-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
+    <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="edit-schedule-version" class="form-control"></select></div>
+    <input type="hidden" id="edit-schedule-id">
+  </div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('edit-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmEditSchedule()">确认修改</button></div>
+</div></div>
+
+<!-- Config Add Modal -->
+<div id="config-modal" class="modal-overlay"><div class="modal" style="max-width:450px">
+  <div class="modal-header"><h3 id="config-modal-title">添加配置项</h3><button class="modal-close" onclick="closeModal('config-modal')">×</button></div>
+  <div class="modal-body"><div class="form-group"><label id="config-label-text">名称 <span class="required">*</span></label><input type="text" id="config-item-input" class="form-control"></div><input type="hidden" id="config-category-input"></div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('config-modal')">取消</button><button type="button" class="btn btn-primary" onclick="addConfigItem()">保存</button></div>
+</div></div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

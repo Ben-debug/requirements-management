@@ -1,0 +1,11 @@
+node_modules/
+data/
+public/uploads/*
+!public/uploads/.gitkeep
+Release/
+*.db
+*.db-shm
+*.db-wal
+package-lock.json
+.DS_Store
+Thumbs.db

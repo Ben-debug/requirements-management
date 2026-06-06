@@ -5,6 +5,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const fs = require('fs');
 const { getDatabase } = require('./database');
+const config = require('./config');
 
 const app = express();
 const PORT = 3000;
@@ -22,13 +23,26 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
 });
 
-const uploadDir = path.join(DATA_DIR, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now()+'-'+Math.round(Math.random()*1E9)+'-'+file.originalname)
-});
-const upload = multer({ storage });
+// Upload directories organized by file type
+const uploadBaseDir = path.join(DATA_DIR, 'public', 'uploads');
+const flowFileDir = path.join(uploadBaseDir, 'flow_files');
+const meetingFileDir = path.join(uploadBaseDir, 'meeting_files');
+// Ensure all upload directories exist
+if (!fs.existsSync(flowFileDir)) fs.mkdirSync(flowFileDir, { recursive: true });
+if (!fs.existsSync(meetingFileDir)) fs.mkdirSync(meetingFileDir, { recursive: true });
+
+// Rename helper: rename uploaded file with proper name under correct dir
+function renameUploadedFile(oldPath, targetDir, newName) {
+  const ext = path.extname(oldPath);
+  const safeName = newName.replace(/[<>:"/\\|?*]/g, '_');
+  const newPath = path.join(targetDir, Date.now()+'-'+safeName+ext);
+  try {
+    fs.renameSync(oldPath, newPath);
+    return newPath;
+  } catch(e) { return oldPath; }
+}
+
+const uploadTemp = multer({ dest: uploadBaseDir });
 
 // ---- Auto create upgrade log on restart ----
 try {
@@ -88,9 +102,10 @@ app.get('/api/orders/check/:orderNumber', (req, res) => {
 app.post('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
-    const { order_number, name, department, proposer, propose_date, business_launch_date } = req.body;
+    const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date } = req.body;
     if (db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(order_number)) return res.status(400).json({ success: false, message: '编号已存在' });
-    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?)').run(order_number, name, department, proposer, propose_date, business_launch_date);
+    const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
+    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, propose_date, business_launch_date);
     res.json({ success: true, data: { id: r.lastInsertRowid } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -98,8 +113,9 @@ app.post('/api/orders', (req, res) => {
 app.put('/api/orders/:id', (req, res) => {
   try {
     const db = getDatabase();
-    const { name, department, proposer, propose_date, business_launch_date } = req.body;
-    db.prepare("UPDATE requirement_orders SET name=?,department=?,proposer=?,propose_date=?,business_launch_date=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, proposer, propose_date, business_launch_date, req.params.id);
+    const { name, department, related_departments, proposer, propose_date, business_launch_date } = req.body;
+    const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
+    db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -135,9 +151,25 @@ app.delete('/api/points/:id', (req, res) => {
 });
 
 // ---- 文件 ----
-app.post('/api/orders/:orderId/files', upload.single('file'), (req, res) => {
+function encodeName(name) { try { return Buffer.from(name, 'latin1').toString('utf8'); } catch(e) { return name; } }
+
+// 需求单流转文件: 校验后存入 flow_files 子目录，保持原始文件名
+app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: '请选择文件' });
-  try { const db = getDatabase(); const { file_type } = req.body; db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, req.file.originalname, req.file.filename, req.file.path); res.json({ success: true }); }
+  try { const db = getDatabase(); const { file_type } = req.body; if (!file_type) return res.status(400).json({ success: false, message: '请选择文件类型' });
+    const name = encodeName(req.file.originalname);
+    const order = db.prepare('SELECT order_number, name FROM requirement_orders WHERE id=?').get(req.params.orderId);
+    if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
+    // 校验命名规范：文件名应以【文件类型】开头
+    if (!name.startsWith(`【${file_type}】`)) {
+      try { fs.unlinkSync(req.file.path); } catch(e) {}
+      return res.status(400).json({ success: false, message: `文件名必须以"【${file_type}】"开头，正确示例：${'【'+file_type+'】'+order.order_number+'-'+order.name+path.extname(name)}` });
+    }
+    // 移动文件到 flow_files 子目录，保持原名
+    const destPath = path.join(flowFileDir, Date.now()+'-'+name);
+    try { fs.renameSync(req.file.path, destPath); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
+    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, name, path.basename(destPath), destPath);
+    res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -167,9 +199,22 @@ app.post('/api/meetings', (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-app.post('/api/meetings/:id/file', upload.single('file'), (req, res) => {
+// CCB会议纪要: 校验命名规范，通过后存入 meeting_files，保持原名
+app.post('/api/meetings/:id/file', uploadTemp.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false });
-  try { const db = getDatabase(); db.prepare('UPDATE ccb_meetings SET file_name=?, file_path=? WHERE id=?').run(req.file.originalname, req.file.path, req.params.id); res.json({ success: true }); }
+  try { const db = getDatabase();
+    const meeting = db.prepare('SELECT meeting_name FROM ccb_meetings WHERE id=?').get(req.params.id);
+    if (!meeting) return res.status(404).json({ success: false, message: '会议不存在' });
+    const name = encodeName(req.file.originalname);
+    // 校验命名规范：文件名应以【会议纪要】开头
+    if (!name.startsWith('【会议纪要】')) {
+      try { fs.unlinkSync(req.file.path); } catch(e) {}
+      return res.status(400).json({ success: false, message: `文件名必须以"【会议纪要】"开头，正确示例：【会议纪要】${meeting.meeting_name}${path.extname(name)}` });
+    }
+    const destPath = path.join(meetingFileDir, Date.now()+'-'+name);
+    try { fs.renameSync(req.file.path, destPath); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
+    db.prepare('UPDATE ccb_meetings SET file_name=?, file_path=? WHERE id=?').run(path.basename(destPath), destPath, req.params.id);
+    res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -260,9 +305,9 @@ app.get('/api/schedules/filter', (req, res) => {
     const offset = (p - 1) * ps;
     const schedules = db.prepare(`${sql} LIMIT ? OFFSET ?`).all(...params, ps, offset);
     
-    const allVersions = db.prepare("SELECT label FROM config_params WHERE category='version' ORDER BY sort_order").all();
-    const allDepartments = db.prepare("SELECT label FROM config_params WHERE category='department' ORDER BY sort_order").all();
-    const allSystems = db.prepare("SELECT label FROM config_params WHERE category='system' ORDER BY sort_order").all();
+    const allVersions = config.getCategory('version');
+    const allDepartments = config.getCategory('department');
+    const allSystems = config.getCategory('system');
     const allMeetings = db.prepare('SELECT DISTINCT meeting_name FROM ccb_meetings ORDER BY meeting_name').all();
     
     let grouped = null;
@@ -280,11 +325,12 @@ app.get('/api/schedules/filter', (req, res) => {
       });
     }
     
-    res.json({ success: true, data: schedules, total, page: p, pageSize: ps, totalPages: Math.ceil(total/ps), grouped, filters: { versions: allVersions.map(v=>v.label), departments: allDepartments.map(d=>d.label), meetings: allMeetings.map(m=>m.meeting_name), systems: allSystems.map(s=>s.label) } });
+    res.json({ success: true, data: schedules, total, page: p, pageSize: ps, totalPages: Math.ceil(total/ps), grouped, filters: { versions: allVersions, departments: allDepartments, meetings: allMeetings.map(m=>m.meeting_name), systems: allSystems } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ---- Excel导出（含排期信息） ----
+function pad2(n) { return String(n).padStart(2,'0'); }
 app.get('/api/export', (req, res) => {
   try {
     const db = getDatabase();
@@ -320,13 +366,16 @@ app.get('/api/export', (req, res) => {
     
     const ws = xlsx.utils.json_to_sheet(rows);
     xlsx.utils.book_append_sheet(wb, ws, '需求单信息');
-    const fp = path.join(uploadDir, 'export_'+Date.now()+'.xlsx');
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}`;
+    const fileName = `需求单信息-${dateStr}.xlsx`;
+    const fp = path.join(uploadBaseDir, fileName);
     xlsx.writeFile(wb, fp);
-    res.download(fp, '需求单信息导出.xlsx', err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
+    res.download(fp, fileName, err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-app.post('/api/import', upload.single('file'), (req, res) => {
+app.post('/api/import', uploadTemp.single('file'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: '请选择文件' });
     const wb = xlsx.readFile(req.file.path); const ws = wb.Sheets[wb.SheetNames[0]]; const data = xlsx.utils.sheet_to_json(ws);
@@ -351,24 +400,24 @@ app.post('/api/import', upload.single('file'), (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ---- 参数配置 ----
+// ---- 参数配置 (JSON文件存储) ----
 app.get('/api/config/:category', (req, res) => {
-  try { const db = getDatabase(); const items = db.prepare('SELECT id, label FROM config_params WHERE category=? ORDER BY sort_order, id').all(req.params.category); res.json({ success: true, data: items.map(i=>i.label) }); }
+  try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/config', (req, res) => {
-  try { const db = getDatabase(); const all = db.prepare('SELECT * FROM config_params ORDER BY category, sort_order, id').all(); const g = {}; all.forEach(i => { if(!g[i.category]) g[i.category]=[]; g[i.category].push({id:i.id,label:i.label}); }); res.json({ success: true, data: g }); }
+  try { res.json({ success: true, data: config.getAll() }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.post('/api/config', (req, res) => {
-  try { const db = getDatabase(); const {category, label} = req.body; if (!category||!label) return res.status(400).json({ success: false, message: '不能为空' }); const max = db.prepare('SELECT MAX(sort_order) as max FROM config_params WHERE category=?').get(category); db.prepare('INSERT OR IGNORE INTO config_params (category,label,sort_order) VALUES (?,?,?)').run(category, label, (max?.max??0)+1); res.json({ success: true }); }
+  try { const {category, label} = req.body; if (!category||!label) return res.status(400).json({ success: false, message: '不能为空' }); config.addItem(category, label); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-app.delete('/api/config/:id', (req, res) => {
-  try { const db = getDatabase(); db.prepare('DELETE FROM config_params WHERE id=?').run(req.params.id); res.json({ success: true }); }
+app.delete('/api/config/:category/:label', (req, res) => {
+  try { config.deleteItem(req.params.category, req.params.label); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -384,4 +433,35 @@ app.use((req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => console.log(`需求单信息管理系统已启动: http://localhost:${PORT}`));
+const server = app.listen(PORT, () => {
+  console.log(`需求单信息管理系统已启动: http://localhost:${PORT}`);
+  // Auto-open browser (delayed to ensure server ready)
+  setTimeout(() => {
+    try {
+      const url = `http://localhost:${PORT}`;
+      const cp = require('child_process');
+      if (process.platform === 'win32') {
+        cp.exec(`cmd /c start "" "${url}"`);
+      } else if (process.platform === 'darwin') {
+        cp.exec(`open "${url}"`);
+      } else {
+        cp.exec(`xdg-open "${url}"`);
+      }
+    } catch(e) {}
+  }, 500);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n错误: 端口 ${PORT} 已被占用！`);
+    console.error('请关闭占用该端口的程序后重试。');
+    console.error(`\n如果浏览器已打开，请直接访问: http://localhost:${PORT}`);
+    try {
+      const url = `http://localhost:${PORT}`;
+      const cp = require('child_process');
+      if (process.platform === 'win32') cp.exec(`cmd /c start "" "${url}"`);
+    } catch(e) {}
+  } else {
+    console.error('启动失败:', err.message);
+  }
+});

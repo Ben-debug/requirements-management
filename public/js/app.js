@@ -89,7 +89,7 @@ async function loadConfig() {
       if (count) count.textContent = `${items.length}项`;
       if (!body) return;
       if (!items.length) { body.innerHTML = '<div class="config-item"><span style="color:#999">暂无配置</span></div><div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="showAddConfig(\''+cat+'\')">＋ 添加</button></div>'; return; }
-      body.innerHTML = items.map(item => `<div class="config-item"><span>${esc(item.label)}</span><button class="btn btn-sm btn-danger" onclick="deleteConfigItem(${item.id})">删除</button></div>`).join('') +
+      body.innerHTML = items.map(item => `<div class="config-item"><span>${esc(item)}</span><button class="btn btn-sm btn-danger" onclick="deleteConfigItem('${cat}','${esc(item)}')">删除</button></div>`).join('') +
         `<div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="showAddConfig('${cat}')">＋ 添加</button></div>`;
     });
   } catch(e) { console.error(e); }
@@ -111,9 +111,9 @@ async function addConfigItem() {
   try { await api('/api/config',{method:'POST',body:JSON.stringify({category:cat,label:lbl})}); showToast('添加成功','success'); closeModal('config-modal'); loadConfig(); } catch(e) {}
 }
 
-async function deleteConfigItem(id) {
+async function deleteConfigItem(cat, label) {
   if (!confirm('确定删除？')) return;
-  try { await api(`/api/config/${id}`,{method:'DELETE'}); showToast('已删除','success'); loadConfig(); } catch(e) {}
+  try { await api(`/api/config/${encodeURIComponent(cat)}/${encodeURIComponent(label)}`,{method:'DELETE'}); showToast('已删除','success'); loadConfig(); } catch(e) {}
 }
 
 // ---- Orders with Pagination ----
@@ -122,13 +122,17 @@ async function loadOrders() {
     const r = await api(`/api/orders?page=${state.orderPage}&pageSize=10`);
     state.orders = r.items;
     const tbody = document.querySelector('#orders-table tbody');
-    if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">📋</div><p>暂无需求单数据</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
-    tbody.innerHTML = r.items.map(o => `<tr>
+    if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">📋</div><p>暂无需求单数据</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
+    tbody.innerHTML = r.items.map(o => {
+      const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
+      return `<tr>
       <td><a href="javascript:void(0)" onclick="viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
-      <td>${esc(o.name)}</td><td>${esc(o.department||'-')}</td><td>${esc(o.proposer||'-')}</td>
+      <td>${esc(o.name)}</td><td>${esc(o.department||'-')}</td>
+      <td>${rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-'}</td>
+      <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
       <td><div class="action-group"><button class="btn btn-sm" onclick="viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteOrder(${o.id})">删除</button></div></td>
-    </tr>`).join('');
+    </tr>`}).join('');
     renderPagination('orders-pagination', r);
   } catch(e) {}
 }
@@ -146,27 +150,60 @@ function gotoOrderPage(p) { state.orderPage = p; loadOrders(); }
 function gotoSchedulePage(p) { state.schedulePage = p; applyFilter(); }
 
 document.getElementById('order-form')?.addEventListener('submit', async e => {
-  e.preventDefault(); const data = Object.fromEntries(new FormData(e.target));
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  // Convert FormData to object - handle multiple checkboxes
+  const data = {};
+  for (const [key, val] of fd.entries()) {
+    if (key === 'related_departments') {
+      if (!data[key]) data[key] = [];
+      data[key].push(val);
+    } else {
+      data[key] = val;
+    }
+  }
   if (!/^[A-Z]\d{2}$/.test(data.order_number)) { showToast('格式：1大写字母+2数字','error'); return; }
   try {
     if (!state.editingOrderId) { const c = await (await fetch(`/api/orders/check/${data.order_number}`)).json(); if (c.exists) { showToast('编号已存在','error'); return; } }
-    if (state.editingOrderId) { await api(`/api/orders/${state.editingOrderId}`,{method:'PUT',body:JSON.stringify(data)}); showToast('更新成功','success'); }
-    else { await api('/api/orders',{method:'POST',body:JSON.stringify(data)}); showToast('创建成功','success'); }
-    closeModal('order-modal'); e.target.reset(); state.editingOrderId = null; loadOrders();
-  } catch(e) {}
+    const body = JSON.stringify(data);
+    if (state.editingOrderId) { await api(`/api/orders/${state.editingOrderId}`,{method:'PUT',body}); showToast('更新成功','success'); }
+    else { await api('/api/orders',{method:'POST',body}); showToast('创建成功','success'); }
+    closeModal('order-modal'); state.editingOrderId = null; loadOrders();
+  } catch(e) { showToast(e.message||'保存失败','error'); }
 });
 
-function showCreateOrder() { state.editingOrderId = null; document.getElementById('order-modal-title').textContent = '新建需求单'; document.getElementById('order-form').reset(); document.getElementById('order_number').disabled = false; loadDropdowns(); openModal('order-modal'); }
-async function editOrder(id) { state.editingOrderId = id; const o = (await api(`/api/orders/${id}`)).data; document.getElementById('order-modal-title').textContent = '编辑需求单'; document.getElementById('order_number').value = o.order_number; document.getElementById('order_number').disabled = true; document.getElementById('order_name').value = o.name; await loadDropdowns(); document.getElementById('department').value = o.department||''; document.getElementById('proposer').value = o.proposer||''; document.getElementById('propose_date').value = o.propose_date||''; document.getElementById('business_launch_date').value = o.business_launch_date||''; openModal('order-modal'); }
+function showCreateOrder() { state.editingOrderId = null; document.getElementById('order-modal-title').textContent = '新建需求单'; document.getElementById('order-form').reset(); document.getElementById('order_number').disabled = false; loadDropdowns(); loadRelatedDeptCheckboxes([]); openModal('order-modal'); }
+async function editOrder(id) { state.editingOrderId = id; const o = (await api(`/api/orders/${id}`)).data; document.getElementById('order-modal-title').textContent = '编辑需求单'; document.getElementById('order_number').value = o.order_number; document.getElementById('order_number').disabled = true; document.getElementById('order_name').value = o.name; await loadDropdowns(); document.getElementById('department').value = o.department||''; document.getElementById('proposer').value = o.proposer||''; document.getElementById('propose_date').value = o.propose_date||''; document.getElementById('business_launch_date').value = o.business_launch_date||''; const rds = o.related_departments ? o.related_departments.split(',').map(s=>s.trim()).filter(Boolean) : []; loadRelatedDeptCheckboxes(rds); openModal('order-modal'); }
 async function deleteOrder(id) { if (!confirm('确定删除？')) return; try { await api(`/api/orders/${id}`,{method:'DELETE'}); showToast('已删除','success'); loadOrders(); } catch(e) {} }
 
 // ---- Detail ----
+
+function loadRelatedDeptCheckboxes(selected) {
+  const container = document.getElementById('related-departments');
+  if (!container) return;
+  const deptSel = document.getElementById('department');
+  const selectedDept = deptSel ? deptSel.value : '';
+  api('/api/config/department').then(d => {
+    const depts = (d.data || []).filter(x => x !== selectedDept);
+    container.innerHTML = depts.map(dept =>
+      `<label class="checkbox-label"><input type="checkbox" name="related_departments" value="${esc(dept)}" ${selected.includes(dept)?'checked':''}> ${esc(dept)}</label>`
+    ).join('');
+  }).catch(() => {});
+}
+function onDeptChange() {
+  loadRelatedDeptCheckboxes([]);
+}
+
 async function viewOrder(id) {
   const o = (await api(`/api/orders/${id}`)).data; state.currentOrder = o;
   for (const k of ['detail-number','detail-number-display']) document.getElementById(k).textContent = o.order_number;
   document.getElementById('detail-name').textContent = o.name; document.getElementById('detail-department').textContent = o.department||'-';
   document.getElementById('detail-proposer').textContent = o.proposer||'-'; document.getElementById('detail-propose-date').textContent = o.propose_date||'-';
   document.getElementById('detail-launch-date').textContent = o.business_launch_date||'-'; document.getElementById('detail-order-id').value = o.id;
+  // Show related departments
+  const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
+  document.getElementById('detail-related-depts').innerHTML = rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-';
   await loadDropdowns(); renderDetailPoints(o.points||[]); renderFiles(o.files||[]); openModal('detail-modal');
 }
 

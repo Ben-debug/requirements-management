@@ -4,9 +4,16 @@
   "description": "需求单信息管理系统",
   "main": "server/index.js",
   "bin": "server/index.js",
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  },
   "scripts": {
     "start": "node server/index.js",
-    "build": "npx pkg . --targets node18-win-x64 --output Release/需求单信息管理系统.exe"
+    "build": "npx pkg . --targets node18-win-x64 --no-bytecode --no-native-build --output Release/需求单信息管理系统.exe"
   },
   "pkg": {
     "assets": ["public/**/*"],

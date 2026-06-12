@@ -58,32 +58,25 @@
     <span style="font-size:12px;color:#999">排序</span>
     <select id="filter-sort" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
       <option value="created_at">创建时间</option>
-      <option value="order_number">编号</option>
+      <option value="order_number" selected>编号</option>
       <option value="propose_date">提出日期</option>
       <option value="department">部门</option>
       <option value="name">名称</option>
     </select>
     <select id="filter-order" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
       <option value="desc">降序</option>
-      <option value="asc">升序</option>
+      <option value="asc" selected>升序</option>
     </select>
     <span style="font-size:12px;color:#999">分组</span>
     <select id="filter-group-orders" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
       <option value="">不分组</option>
-      <option value="department">按部门</option>
-    </select>
-    <span style="font-size:12px;color:#999">每页</span>
-    <select id="filter-page-size" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-      <option value="10">10</option>
-      <option value="20">20</option>
-      <option value="50">50</option>
-      <option value="100">100</option>
+      <option value="department" selected>按部门</option>
     </select>
   </div>
 
   <div class="table-container">
     <table id="orders-table"><thead><tr>
-      <th>需求单编号</th><th>名称</th><th>提出部门</th><th>关联部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>操作</th>
+      <th>需求单编号</th><th>名称</th><th>提出部门</th><th>关联部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>排期一览</th><th>操作</th>
     </tr></thead><tbody><tr><td colspan="8"><div class="loading">加载中...</div></td></tr></tbody></table>
     <div id="orders-pagination" class="pagination"></div>
   </div>

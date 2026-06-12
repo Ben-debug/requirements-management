@@ -116,6 +116,27 @@ app.get('/api/orders', (req, res) => {
       });
     }
     
+    // 为每个需求单补充排期摘要（总点数/已排期点数）
+    const scheduleSummary = (orderIds) => {
+      if (!orderIds.length) return {};
+      const placeholders = orderIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT rp.order_id, COUNT(*) as total, SUM(CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END) as scheduled
+        FROM requirement_points rp LEFT JOIN ccb_schedules cs ON cs.point_id=rp.id
+        WHERE rp.order_id IN (${placeholders}) GROUP BY rp.order_id`).all(...orderIds);
+      const map = {};
+      rows.forEach(r => { map[r.order_id] = { total: r.total, scheduled: r.scheduled }; });
+      return map;
+    };
+    const allIds = (result.items || []).map(o => o.id);
+    if (grouped) Object.values(grouped).forEach(arr => arr.forEach(o => allIds.push(o.id)));
+    const uniqueIds = [...new Set(allIds)];
+    const summary = scheduleSummary(uniqueIds);
+    const enrich = (o) => { o.schedule_summary = summary[o.id] || { total: 0, scheduled: 0 }; return o; };
+    result.items = result.items.map(enrich);
+    if (grouped) {
+      Object.keys(grouped).forEach(k => { grouped[k] = grouped[k].map(enrich); });
+    }
+    
     const departments = config.getCategory('department');
     res.json({ success: true, ...result, grouped, filters: { departments } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -251,7 +272,7 @@ app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => 
     // 以"订单ID-文件名"方式存储到 flow_files 根目录，避免不同订单文件重名
     const flowDir = getFlowFileDir();
     if (!fs.existsSync(flowDir)) fs.mkdirSync(flowDir, { recursive: true });
-    const storedName = `${req.params.orderId}-${fixedName}`;
+    const storedName = fixedName;
     const destPath = path.join(flowDir, storedName);
     // 同名文件处理：追加数字后缀
     let finalPath = destPath;
@@ -313,7 +334,7 @@ app.post('/api/meetings/:id/file', uploadTemp.single('file'), (req, res) => {
     const meetingDir = getMeetingFileDir();
     if (!fs.existsSync(meetingDir)) fs.mkdirSync(meetingDir, { recursive: true });
     // 以"会议ID-原文件名"方式存储，避免不同会议的文件重名覆盖
-    const storedName = `${req.params.id}-${name}`;
+    const storedName = name;
     const destPath = path.join(meetingDir, storedName);
     // 同名文件处理：追加数字后缀
     let finalPath = destPath;

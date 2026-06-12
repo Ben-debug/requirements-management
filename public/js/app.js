@@ -169,7 +169,7 @@ async function savePaths() {
 
 // ---- Orders with Pagination + Filters ----
 function getFilterParams() {
-  const pageSize = parseInt(document.getElementById('filter-page-size')?.value) || 10;
+  const pageSize = parseInt(document.getElementById('pagination-page-size')?.value) || 10;
   const params = { page: state.orderPage, pageSize: pageSize > 0 ? pageSize : 10 };
   const dept = document.getElementById('filter-department')?.value;
   if (dept) params.department = dept;
@@ -194,16 +194,29 @@ async function loadOrders() {
     state.orders = r.items;
     document.getElementById('filter-result-info').textContent = r.total ? `共 ${r.total} 条` : '';
     const tbody = document.querySelector('#orders-table tbody');
-    if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
+    if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
     
     function orderRow(o) {
       const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
+      // 计算排期状态
+      var schedCount = (o.schedule_summary||{}).scheduled || 0, totalPoints = (o.schedule_summary||{}).total || 0;
+      var schedHtml = '';
+      if (totalPoints === 0) {
+        schedHtml = '<span style="font-size:12px;color:#999">—</span>';
+      } else if (schedCount === totalPoints) {
+        schedHtml = '<span style="font-size:12px;color:#52c41a;font-weight:500">✅ ' + schedCount + '/' + totalPoints + '</span>';
+      } else if (schedCount > 0) {
+        schedHtml = '<span style="font-size:12px;color:#fa8c16;font-weight:500">⏳ ' + schedCount + '/' + totalPoints + '</span>';
+      } else {
+        schedHtml = '<span style="font-size:12px;color:#ff4d4f;font-weight:500">⏳ 0/' + totalPoints + '</span>';
+      }
       return `<tr>
       <td><a href="javascript:void(0)" onclick="viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
       <td>${esc(o.name)}</td><td>${esc(o.department||'-')}</td>
       <td>${rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-'}</td>
       <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
+      <td style="text-align:center">${schedHtml}</td>
       <td><div class="action-group"><button class="btn btn-sm" onclick="viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteOrder(${o.id})">删除</button></div></td>
     </tr>`;
     }
@@ -212,7 +225,7 @@ async function loadOrders() {
       // 分组展示
       let html = '';
       Object.keys(r.grouped).sort().forEach(key => {
-        html += `<tr style="background:#e6f7ff"><td colspan="8" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${r.grouped[key].length}条)</td></tr>`;
+        html += `<tr style="background:#e6f7ff"><td colspan="9" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${r.grouped[key].length}条)</td></tr>`;
         r.grouped[key].forEach(o => { html += orderRow(o); });
       });
       tbody.innerHTML = html;
@@ -221,7 +234,6 @@ async function loadOrders() {
     }
     
     renderPagination('orders-pagination', r);
-    // 填充筛选部门下拉
     if (r.filters?.departments) {
       const sel = document.getElementById('filter-department');
       if (sel && sel.options.length <= 1) {
@@ -229,15 +241,38 @@ async function loadOrders() {
       }
     }
   } catch(e) {}
-}
 
-function onFilterChange() { state.orderPage = 1; loadOrders(); }
-function applyFilters() { state.orderPage = 1; loadOrders(); }
 function resetFilters() {
-  document.getElementById('filter-keyword').value = '';
   document.getElementById('filter-department').value = '';
   document.getElementById('filter-date-from').value = '';
   document.getElementById('filter-date-to').value = '';
+  document.getElementById('filter-group-orders').value = 'department';
+  document.getElementById('filter-sort').value = 'order_number';
+  document.getElementById('filter-order').value = 'asc';
+  state.orderPage = 1; loadOrders();
+}
+function renderPagination(containerId, r) {
+  const c = document.getElementById(containerId); if (!c) return;
+  if (!r || r.totalPages <= 1) { c.innerHTML = ''; return; }
+  c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+    <div>
+      <button class="page-btn" onclick="gotoOrderPage(1)" ${r.page<=1?'disabled':''}>«</button>
+      <button class="page-btn" onclick="gotoOrderPage(${r.page-1})" ${r.page<=1?'disabled':''}>‹</button>
+      <span class="page-info">第 ${r.page}/${r.totalPages} 页 (共${r.total}条)</span>
+      <button class="page-btn" onclick="gotoOrderPage(${r.page+1})" ${r.page>=r.totalPages?'disabled':''}>›</button>
+      <button class="page-btn" onclick="gotoOrderPage(${r.totalPages})" ${r.page>=r.totalPages?'disabled':''}>»</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:12px;color:#999">每页</span>
+      <select id="pagination-page-size" onchange="gotoOrderPage(1); loadOrders();" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+  </div>`;
+}
   state.orderPage = 1; loadOrders();
 }
 

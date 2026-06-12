@@ -19,16 +19,28 @@ if (process.pkg) {
   DATA_DIR = path.join(__dirname, '..', 'data');
 }
 
-const DB_PATH = path.join(DATA_DIR, 'requirements.db');
+// Allow custom data dir from main server (set via initDataDir)
+let customDataDir = null;
+
+function getDataDir() {
+  return customDataDir || DATA_DIR;
+}
+
+function initDataDir(dir) {
+  if (dir) customDataDir = dir;
+}
+
+const DB_PATH = path.join(getDataDir(), 'requirements.db');
 let db;
 
 function getDatabase() {
   if (!db) {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-    
-    db = new Database(DB_PATH);
+
+    db = new Database(path.join(dataDir, 'requirements.db'));
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     initDatabase();
@@ -75,6 +87,9 @@ function initDatabase() {
       content TEXT, created_at TEXT DEFAULT (datetime('now','localtime'))
     );
   `);
+  // 兼容性迁移：旧数据库可能缺少新增列
+  try { db.exec("ALTER TABLE requirement_points ADD COLUMN sub_batch TEXT"); } catch(e) {}
+  try { db.exec("ALTER TABLE requirement_orders ADD COLUMN background TEXT"); } catch(e) {}
 }
 
-module.exports = { getDatabase };
+module.exports = { getDatabase, initDataDir };

@@ -1,6 +1,6 @@
 {
   "name": "requirement-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "需求单信息管理系统",
   "main": "server/index.js",
   "bin": "server/index.js",

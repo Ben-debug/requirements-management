@@ -23,19 +23,38 @@
 <main class="main-content">
 <!-- Orders Page -->
 <div id="page-orders" class="page-content" style="display:block">
-  <div class="page-header"><h2>📄 需求单管理</h2><p>点击需求单编号查看详情。支持新增、编辑、删除、Excel导入导出</p></div>
-  <div class="toolbar">
-    <input type="text" id="global-search" placeholder="🔍 搜索需求单编号、名称、需求点..." style="min-width:320px">
-    <button class="btn btn-primary" onclick="showCreateOrder()">＋ 新建需求单</button>
-    <button class="btn btn-success" onclick="importExcel()">📥 导入Excel</button>
-    <button class="btn btn-export" onclick="exportExcel()">📤 导出Excel</button>
+  <div class="page-header">
+    <h2>📄 需求单管理</h2>
+    <p>点击需求单编号查看详情。支持条件筛选、Excel导入导出</p>
+  </div>
+  <!-- 筛选栏 -->
+  <div class="filter-bar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:12px 16px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)">
+    <input type="text" id="filter-keyword" placeholder="🔍 搜索编号/名称/提出人" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;min-width:200px">
+    <select id="filter-department" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;min-width:120px">
+      <option value="">全部部门</option>
+    </select>
+    <input type="date" id="filter-date-from" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px">
+    <span style="color:#999">—</span>
+    <input type="date" id="filter-date-to" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px">
+    <button class="btn btn-primary btn-sm" onclick="applyFilters()">🔍 查询</button>
+    <button class="btn btn-sm" onclick="resetFilters()">↻ 重置</button>
+    <span id="filter-result-info" style="font-size:13px;color:#999;margin-left:4px"></span>
+  </div>
+  <!-- 操作栏 -->
+  <div class="toolbar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="showCreateOrder()">📄 新建需求单</button>
+    <button class="btn btn-success" onclick="importExcel()">📥 批量导入</button>
+    <button class="btn" onclick="downloadTemplate()" title="下载导入模板">📋 下载模板</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-export" onclick="exportExcel()">📤 导出全部</button>
+    <button class="btn btn-export" onclick="exportFiltered()" id="btn-export-filtered" style="opacity:0.7">📤 导出筛选结果</button>
     <input type="file" id="import-file" class="hidden-input" accept=".xlsx,.xls">
   </div>
   <div id="search-results" class="search-results-container"></div>
   <div class="table-container">
     <table id="orders-table"><thead><tr>
       <th>需求单编号</th><th>名称</th><th>提出部门</th><th>关联部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>操作</th>
-    </tr></thead><tbody><tr><td colspan="7"><div class="loading">加载中...</div></td></tr></tbody></table>
+    </tr></thead><tbody><tr><td colspan="8"><div class="loading">加载中...</div></td></tr></tbody></table>
     <div id="orders-pagination" class="pagination"></div>
   </div>
 </div>
@@ -103,6 +122,31 @@
       </div>
       <div class="config-group-body" id="config-body-file_type"></div>
     </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">📂 存储路径设置</span>
+        <div><span style="font-size:12px;color:#999;margin-right:12px" id="path-save-status"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-paths">
+        <p style="font-size:13px;color:#999;margin-bottom:12px">修改后立即生效，data目录变更需重启服务。留空表示使用默认路径。</p>
+        <div class="form-group">
+          <label>数据存储目录</label>
+          <input type="text" id="path-data-dir" class="form-control" placeholder="data/" onchange="onPathChange()">
+          <div class="form-hint">数据库和配置文件的存储位置</div>
+        </div>
+        <div class="form-group">
+          <label>需求单流转文件目录</label>
+          <input type="text" id="path-flow-files" class="form-control" placeholder="public/uploads/flow_files/" onchange="onPathChange()">
+          <div class="form-hint">需求单上传的流转文件</div>
+        </div>
+        <div class="form-group">
+          <label>CCB纪要文件目录</label>
+          <input type="text" id="path-meeting-files" class="form-control" placeholder="public/uploads/meeting_files/" onchange="onPathChange()">
+          <div class="form-hint">CCB会议纪要文件</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="savePaths()">保存路径设置</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -123,6 +167,7 @@
     <div class="form-group"><label>关联部门（可多选，非必填）</label><div id="related-departments" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:36px"></div></div></div>
     <div class="form-row"><div class="form-group"><label>提出人 <span class="required">*</span></label><input type="text" id="proposer" name="proposer" class="form-control" required></div>
     <div class="form-group"><label>提出日期 <span class="required">*</span></label><input type="date" id="propose_date" name="propose_date" class="form-control" required></div></div>
+    <div class="form-group"><label>提出背景 <span class="required">*</span></label><textarea id="background" name="background" class="form-control" required placeholder="说明提出该需求的原因、背景和期望达到的业务目标"></textarea></div>
     <div class="form-row"><div class="form-group"><label>上线预期 <span class="required">*</span></label><input type="text" id="business_launch_date" name="business_launch_date" class="form-control" placeholder="日期或文字" required></div>
     <div class="form-group"></div></div>
   </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('order-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
@@ -140,6 +185,7 @@
         <div class="detail-item"><div class="label">关联部门</div><div class="value" id="detail-related-depts"></div></div>
         <div class="detail-item"><div class="label">提出人</div><div class="value" id="detail-proposer"></div></div>
         <div class="detail-item"><div class="label">提出日期</div><div class="value" id="detail-propose-date"></div></div>
+        <div class="detail-item"><div class="label">提出背景</div><div class="value" id="detail-background"></div></div>
         <div class="detail-item"><div class="label">上线预期</div><div class="value" id="detail-launch-date"></div></div>
       </div>
     </div>
@@ -162,7 +208,28 @@
 <!-- Point Modal -->
 <div id="point-modal" class="modal-overlay"><div class="modal">
   <div class="modal-header"><h3 id="point-modal-title">添加需求点</h3><button class="modal-close" onclick="closeModal('point-modal')">×</button></div>
-  <form id="point-form"><div class="modal-body"><div class="form-group"><label>描述 <span class="required">*</span></label><textarea id="point-description" name="description" class="form-control" required></textarea></div></div>
+  <form id="point-form"><div class="modal-body">
+    <div class="form-group" id="point-number-group" style="display:none">
+      <label>需求点编号</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="point-number-input" class="form-control" placeholder="自动生成" style="max-width:200px">
+        <button type="button" class="btn btn-sm" id="btn-save-point-number" onclick="savePointNumber()" style="display:none">保存编号</button>
+        <span id="point-number-status" style="font-size:12px;color:#999"></span>
+      </div>
+      <div class="form-hint">留空自动生成，格式如 A01-1（无批次）或 A01-1-1（有批次）</div>
+    </div>
+    <div class="form-group" id="point-batch-group">
+      <label>子单批次号
+        <span style="font-weight:400;font-size:12px;color:#999">（仅拆分子单时填写，如 1/2/3 → 将显示为 A01-1）</span>
+      </label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="point-sub-batch" class="form-control" placeholder="留空 = 不拆单" style="max-width:120px">
+        <span id="point-batch-preview" style="font-size:13px;color:#999"></span>
+      </div>
+      <div class="form-hint">填写数字后，需求点编号自动变为 A01-{批次}-{序号}</div>
+    </div>
+    <div class="form-group"><label>描述 <span class="required">*</span></label><textarea id="point-description" name="description" class="form-control" required></textarea></div>
+  </div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('point-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
 </div></div>
 
@@ -222,6 +289,20 @@
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('edit-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmEditSchedule()">确认修改</button></div>
 </div></div>
 
+<!-- Batch Schedule Modal -->
+<div id="batch-schedule-modal" class="modal-overlay"><div class="modal" style="max-width:520px">
+  <div class="modal-header"><h3>整批排期</h3><button class="modal-close" onclick="closeModal('batch-schedule-modal')">×</button></div>
+  <div class="modal-body">
+    <p id="batch-schedule-count" style="font-size:13px;color:#666;margin-bottom:12px"></p>
+    <div class="form-group"><label>CCB会议 <span class="required">*</span></label><select id="batch-schedule-meeting" class="form-control"></select></div>
+    <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="batch-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
+    <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="batch-schedule-version" class="form-control"></select></div>
+    <input type="hidden" id="batch-schedule-order-id">
+    <input type="hidden" id="batch-schedule-batch">
+  </div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('batch-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmBatchSchedule()">确认整批排期</button></div>
+</div></div>
+
 <!-- Config Add Modal -->
 <div id="config-modal" class="modal-overlay"><div class="modal" style="max-width:450px">
   <div class="modal-header"><h3 id="config-modal-title">添加配置项</h3><button class="modal-close" onclick="closeModal('config-modal')">×</button></div>
@@ -231,9 +312,9 @@
 
 <footer class="app-footer">
   <div class="footer-content">
-    <span>需求单信息管理系统 v1.0.0</span>
+    <span>需求单信息管理系统 v1.1.0</span>
     <span>创作者：余新泰</span>
-    <span>发布日期：2026-06-06</span>
+    <span>发布日期：2026-06-12</span>
   </div>
 </footer>
 <script src="/js/app.js"></script>

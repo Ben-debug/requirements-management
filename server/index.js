@@ -4,7 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const xlsx = require('xlsx');
 const fs = require('fs');
-const { getDatabase } = require('./database');
+const { getDatabase, initDataDir } = require('./database');
 const config = require('./config');
 
 const app = express();
@@ -16,6 +16,12 @@ const ROOT_DIR = path.join(__dirname, '..');
 // 注: pkg 环境下 __dirname 指向虚拟快照路径，public 资源通过快照访问
 // 需要物理路径用于文件上传和数据存储
 const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
+// 如果配置了自定义 data 目录，传给数据库模块
+const customDataDir = config.getPath('data_dir');
+if (customDataDir) {
+  initDataDir(customDataDir);
+  if (!fs.existsSync(customDataDir)) fs.mkdirSync(customDataDir, { recursive: true });
+}
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 
 // ---- 提供首页 ----
@@ -23,13 +29,24 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
 });
 
-// Upload directories organized by file type
-const uploadBaseDir = path.join(DATA_DIR, 'public', 'uploads');
-const flowFileDir = path.join(uploadBaseDir, 'flow_files');
-const meetingFileDir = path.join(uploadBaseDir, 'meeting_files');
-// Ensure all upload directories exist
-if (!fs.existsSync(flowFileDir)) fs.mkdirSync(flowFileDir, { recursive: true });
-if (!fs.existsSync(meetingFileDir)) fs.mkdirSync(meetingFileDir, { recursive: true });
+// Upload directories - configured via params page, fallback to defaults
+function getFlowFileDir() {
+  const custom = config.getPath('flow_files_dir');
+  return custom || path.join(DATA_DIR, 'public', 'uploads', 'flow_files');
+}
+function getMeetingFileDir() {
+  const custom = config.getPath('meeting_files_dir');
+  return custom || path.join(DATA_DIR, 'public', 'uploads', 'meeting_files');
+}
+function getUploadBaseDir() {
+  return path.join(DATA_DIR, 'public', 'uploads');
+}
+// Ensure upload directories exist
+function ensureUploadDirs() {
+  const dirs = [getUploadBaseDir(), getFlowFileDir(), getMeetingFileDir()];
+  dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+}
+ensureUploadDirs();
 
 // Rename helper: rename uploaded file with proper name under correct dir
 function renameUploadedFile(oldPath, targetDir, newName) {
@@ -42,7 +59,7 @@ function renameUploadedFile(oldPath, targetDir, newName) {
   } catch(e) { return oldPath; }
 }
 
-const uploadTemp = multer({ dest: uploadBaseDir });
+const uploadTemp = multer({ dest: getUploadBaseDir() });
 
 // ---- Auto create upgrade log on restart ----
 try {
@@ -72,9 +89,18 @@ function paginate(sql, params, page, pageSize) {
 app.get('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
-    const { page=1, pageSize=10 } = req.query;
-    const result = paginate('SELECT * FROM requirement_orders ORDER BY created_at DESC', [], parseInt(page), parseInt(pageSize));
-    res.json({ success: true, ...result });
+    const { page=1, pageSize=10, department, keyword, date_from, date_to } = req.query;
+    let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
+    const params = [];
+    if (department) { sql += ' AND department=?'; params.push(department); }
+    if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
+    if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
+    if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
+    sql += ' ORDER BY created_at DESC';
+    const result = paginate(sql, params, parseInt(page), parseInt(pageSize));
+    // 同时返回筛选条件供前端下拉使用
+    const departments = config.getCategory('department');
+    res.json({ success: true, ...result, filters: { departments } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -102,10 +128,10 @@ app.get('/api/orders/check/:orderNumber', (req, res) => {
 app.post('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
-    const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date } = req.body;
+    const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
     if (db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(order_number)) return res.status(400).json({ success: false, message: '编号已存在' });
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
-    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, propose_date, business_launch_date);
+    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date,background) VALUES (?,?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, propose_date, business_launch_date, background);
     res.json({ success: true, data: { id: r.lastInsertRowid } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -113,9 +139,9 @@ app.post('/api/orders', (req, res) => {
 app.put('/api/orders/:id', (req, res) => {
   try {
     const db = getDatabase();
-    const { name, department, related_departments, proposer, propose_date, business_launch_date } = req.body;
+    const { name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
-    db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, req.params.id);
+    db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -128,21 +154,48 @@ app.delete('/api/orders/:id', (req, res) => {
 // ---- 需求点 ----
 app.post('/api/orders/:orderId/points', (req, res) => {
   try {
-    const db = getDatabase(); const { description } = req.body;
+    const db = getDatabase(); const { description, sub_batch } = req.body;
     const order = db.prepare('SELECT order_number FROM requirement_orders WHERE id=?').get(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-    const max = db.prepare('SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1').get(req.params.orderId);
-    let seq = 1;
-    if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[1]) + 1; }
-    const pointNumber = `${order.order_number}-${String(seq).padStart(2,'0')}`;
-    const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(req.params.orderId, pointNumber, description);
-    res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
+    if (sub_batch !== undefined && sub_batch !== null && sub_batch !== '') {
+      // 有批次号 → 子单模式：编号 A01-1-1
+      if (!/^\d+$/.test(sub_batch)) return res.status(400).json({ success: false, message: '批次号应为纯数字' });
+      const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch=? ORDER BY id DESC LIMIT 1").get(req.params.orderId, sub_batch);
+      let seq = 1;
+      if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[2]) + 1; }
+      const pointNumber = `${order.order_number}-${sub_batch}-${String(seq)}`;
+      const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch);
+      res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
+    } else {
+      // 无批次号 → 传统模式：编号 A01-1
+      const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch IS NULL AND point_number NOT LIKE '%-%-%' ORDER BY id DESC LIMIT 1").get(req.params.orderId);
+      let seq = 1;
+      if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[1]) + 1; }
+      const pointNumber = `${order.order_number}-${String(seq)}`;
+      const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(req.params.orderId, pointNumber, description);
+      res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
+    }
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.put('/api/points/:id', (req, res) => {
   try { const db = getDatabase(); const { description } = req.body; db.prepare("UPDATE requirement_points SET description=?,updated_at=datetime('now','localtime') WHERE id=?").run(description, req.params.id); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 修改需求点编号
+app.put('/api/points/:id/number', (req, res) => {
+  try {
+    const db = getDatabase(); const { point_number } = req.body;
+    if (!point_number || !/^[A-Z]\d{2}(-\d+){1,2}$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01-1 或 A01-1-1）' });
+    const dup = db.prepare('SELECT id FROM requirement_points WHERE point_number=? AND id!=?').get(point_number, req.params.id);
+    if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求点使用' });
+    const point = db.prepare('SELECT id, order_id FROM requirement_points WHERE id=?').get(req.params.id);
+    if (!point) return res.status(404).json({ success: false, message: '需求点不存在' });
+    // 同步更新 ccb_schedules 中的引用显示（如果已排期）
+    db.prepare("UPDATE requirement_points SET point_number=?, updated_at=datetime('now','localtime') WHERE id=?").run(point_number, req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.delete('/api/points/:id', (req, res) => {
@@ -153,7 +206,7 @@ app.delete('/api/points/:id', (req, res) => {
 // ---- 文件 ----
 function encodeName(name) { try { return Buffer.from(name, 'latin1').toString('utf8'); } catch(e) { return name; } }
 
-// 需求单流转文件: 校验后存入 flow_files 子目录，保持原始文件名
+// 需求单流转文件
 app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: '请选择文件' });
   try { const db = getDatabase(); const { file_type } = req.body; if (!file_type) return res.status(400).json({ success: false, message: '请选择文件类型' });
@@ -165,16 +218,32 @@ app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => 
       try { fs.unlinkSync(req.file.path); } catch(e) {}
       return res.status(400).json({ success: false, message: `文件名必须以"【${file_type}】"开头，正确示例：${'【'+file_type+'】'+order.order_number+'-'+order.name+path.extname(name)}` });
     }
-    // 移动文件到 flow_files 子目录，保持原名
-    const destPath = path.join(flowFileDir, Date.now()+'-'+name);
-    try { fs.renameSync(req.file.path, destPath); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
-    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, name, path.basename(destPath), destPath);
-    res.json({ success: true }); }
+    // 按订单ID分目录存储，保持原始文件名
+    const orderDir = path.join(getFlowFileDir(), String(req.params.orderId));
+    if (!fs.existsSync(orderDir)) fs.mkdirSync(orderDir, { recursive: true });
+    const destPath = path.join(orderDir, name);
+    // 同名文件处理：追加数字后缀
+    let finalPath = destPath;
+    let counter = 1;
+    while (fs.existsSync(finalPath)) {
+      const ext = path.extname(name);
+      const base = path.basename(name, ext);
+      finalPath = path.join(orderDir, `${base}(${counter++})${ext}`);
+    }
+    try { fs.copyFileSync(req.file.path, finalPath); fs.unlinkSync(req.file.path); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
+    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, path.basename(finalPath), path.basename(finalPath), finalPath);
+    res.json({ success: true, data: { file_name: path.basename(finalPath) } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/orders/:orderId/files', (req, res) => {
   try { const db = getDatabase(); res.json({ success: true, data: db.prepare('SELECT * FROM flow_files WHERE order_id=? ORDER BY id').all(req.params.orderId) }); }
+  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 文件下载：用原始文件名返回
+app.get('/api/files/:id/download', (req, res) => {
+  try { const db = getDatabase(); const f = db.prepare('SELECT * FROM flow_files WHERE id=?').get(req.params.id); if (!f) return res.status(404).json({ success: false }); if (!fs.existsSync(f.file_path)) return res.status(404).json({ success: false, message: '文件已不存在' }); res.download(f.file_path, f.original_name); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -190,7 +259,7 @@ app.get('/api/meetings', (req, res) => {
 });
 
 app.get('/api/meetings/:id', (req, res) => {
-  try { const db = getDatabase(); const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id); if (!m) return res.status(404).json({ success: false }); const s = db.prepare(`SELECT cs.*, ro.order_number, ro.name as order_name, rp.point_number, rp.description as point_description FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id WHERE cs.meeting_id=? ORDER BY ro.order_number, rp.point_number`).all(req.params.id); res.json({ success: true, data: { ...m, schedules: s } }); }
+  try { const db = getDatabase(); const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id); if (!m) return res.status(404).json({ success: false }); const s = db.prepare(`SELECT cs.*, ro.order_number, ro.name as order_name, rp.point_number, rp.sub_batch, rp.description as point_description FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id WHERE cs.meeting_id=? ORDER BY ro.order_number, rp.point_number`).all(req.params.id); res.json({ success: true, data: { ...m, schedules: s } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -199,7 +268,7 @@ app.post('/api/meetings', (req, res) => {
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// CCB会议纪要: 校验命名规范，通过后存入 meeting_files，保持原名
+// CCB会议纪要: 按会议ID分目录存储，保持原始文件名
 app.post('/api/meetings/:id/file', uploadTemp.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false });
   try { const db = getDatabase();
@@ -211,10 +280,20 @@ app.post('/api/meetings/:id/file', uploadTemp.single('file'), (req, res) => {
       try { fs.unlinkSync(req.file.path); } catch(e) {}
       return res.status(400).json({ success: false, message: `文件名必须以"【会议纪要】"开头，正确示例：【会议纪要】${meeting.meeting_name}${path.extname(name)}` });
     }
-    const destPath = path.join(meetingFileDir, Date.now()+'-'+name);
-    try { fs.renameSync(req.file.path, destPath); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
-    db.prepare('UPDATE ccb_meetings SET file_name=?, file_path=? WHERE id=?').run(path.basename(destPath), destPath, req.params.id);
-    res.json({ success: true }); }
+    const meetingDir = path.join(getMeetingFileDir(), String(req.params.id));
+    if (!fs.existsSync(meetingDir)) fs.mkdirSync(meetingDir, { recursive: true });
+    const destPath = path.join(meetingDir, name);
+    // 同名文件处理：追加数字后缀
+    let finalPath = destPath;
+    let counter = 1;
+    while (fs.existsSync(finalPath)) {
+      const ext = path.extname(name);
+      const base = path.basename(name, ext);
+      finalPath = path.join(meetingDir, `${base}(${counter++})${ext}`);
+    }
+    try { fs.copyFileSync(req.file.path, finalPath); fs.unlinkSync(req.file.path); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
+    db.prepare('UPDATE ccb_meetings SET file_name=?, file_path=? WHERE id=?').run(path.basename(finalPath), finalPath, req.params.id);
+    res.json({ success: true, data: { file_name: path.basename(finalPath) } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -291,7 +370,7 @@ app.get('/api/schedules/filter', (req, res) => {
     const db = getDatabase();
     const { version, department, meeting_name, system, group_by, page=1, pageSize=20 } = req.query;
     
-    let sql = `SELECT cs.*, ro.order_number, ro.name as order_name, ro.department, rp.point_number, rp.description as point_description, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE 1=1`;
+    let sql = `SELECT cs.*, ro.order_number, ro.name as order_name, ro.department, rp.point_number, rp.sub_batch, rp.description as point_description, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE 1=1`;
     const params = [];
     if (version) { sql += ' AND cs.version=?'; params.push(version); }
     if (department) { sql += ' AND ro.department=?'; params.push(department); }
@@ -330,77 +409,258 @@ app.get('/api/schedules/filter', (req, res) => {
 });
 
 // ---- Excel导出（含排期信息） ----
+// 筛选导出：接受与 /api/orders 相同的筛选参数，导出匹配结果
+app.get('/api/export/filtered', (req, res) => {
+  try {
+    const db = getDatabase();
+    const { department, keyword, date_from, date_to } = req.query;
+    let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
+    const params = [];
+    if (department) { sql += ' AND department=?'; params.push(department); }
+    if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
+    if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
+    if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
+    sql += ' ORDER BY order_number';
+    const orders = db.prepare(sql).all(...params);
+    exportOrdersToExcel(orders, res);
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 function pad2(n) { return String(n).padStart(2,'0'); }
+
+// 日期统一格式化：支持 2026/6/11、2026-6-11、20260611 → 2026-06-11
+function normalizeDate(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  let m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return s;
+}
+
+function exportOrdersToExcel(orders, res) {
+  const db = getDatabase();
+  const wb = xlsx.utils.book_new();
+  const rows = [];
+  for (const o of orders) {
+    const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(o.id);
+    if (points.length === 0) {
+      rows.push({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','关联部门':o.related_departments||'','提出人':o.proposer||'','提出日期':o.propose_date||'','提出背景':o.background||'','提出背景':o.background||'', '业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''});
+    } else {
+      for (const p of points) {
+        const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
+        rows.push({
+          '需求单编号':o.order_number, '需求单名称':o.name, '业务部门':o.department||'', '关联部门':o.related_departments||'',
+          '提出人':o.proposer||'', '提出日期':o.propose_date||'', '业务上线预期':o.business_launch_date||'',
+          '需求点编号':p.point_number, '需求点描述':p.description,
+          '涉及系统':sche ? sche.system : (p.system||''), '上线版本':sche ? sche.version : (p.version||''),
+          'CCB会议':sche ? sche.meeting_name : '', '排期日期':sche ? sche.meeting_date : ''
+        });
+      }
+    }
+  }
+  const ws = xlsx.utils.json_to_sheet(rows);
+  xlsx.utils.book_append_sheet(wb, ws, '需求单信息');
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}`;
+  const fileName = `需求单信息-${dateStr}.xlsx`;
+  const fp = path.join(getUploadBaseDir(), fileName);
+  xlsx.writeFile(wb, fp);
+  res.download(fp, fileName, err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
+}
+
+// 简化原有导出为调用公共函数
 app.get('/api/export', (req, res) => {
   try {
     const db = getDatabase();
-    const orders = db.prepare(`SELECT ro.* FROM requirement_orders ro ORDER BY ro.order_number`).all();
-    
-    const wb = xlsx.utils.book_new();
-    const rows = [];
-    
-    for (const o of orders) {
-      const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(o.id);
-      if (points.length === 0) {
-        rows.push({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','提出人':o.proposer||'','提出日期':o.propose_date||'','业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''});
-      } else {
-        for (const p of points) {
-          const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
-          rows.push({
-            '需求单编号':o.order_number,
-            '需求单名称':o.name,
-            '业务部门':o.department||'',
-            '提出人':o.proposer||'',
-            '提出日期':o.propose_date||'',
-            '业务上线预期':o.business_launch_date||'',
-            '需求点编号':p.point_number,
-            '需求点描述':p.description,
-            '涉及系统':sche ? sche.system : (p.system||''),
-            '上线版本':sche ? sche.version : (p.version||''),
-            'CCB会议':sche ? sche.meeting_name : '',
-            '排期日期':sche ? sche.meeting_date : ''
-          });
-        }
+    const orders = db.prepare('SELECT * FROM requirement_orders ORDER BY order_number').all();
+    exportOrdersToExcel(orders, res);
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 导入模板下载
+app.get('/api/import/template', (req, res) => {
+  try {
+    const templateDir = path.join(ROOT_DIR, 'Release');
+    const possiblePaths = [
+      path.join(templateDir, '需求单导入模板.xlsx'),
+      path.join(ROOT_DIR, '需求单导入模板.xlsx'),
+    ];
+    for (const fp of possiblePaths) {
+      if (fs.existsSync(fp)) {
+        return res.download(fp, '需求单导入模板.xlsx');
       }
     }
-    
-    const ws = xlsx.utils.json_to_sheet(rows);
-    xlsx.utils.book_append_sheet(wb, ws, '需求单信息');
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}`;
-    const fileName = `需求单信息-${dateStr}.xlsx`;
-    const fp = path.join(uploadBaseDir, fileName);
-    xlsx.writeFile(wb, fp);
-    res.download(fp, fileName, err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
+    res.status(404).json({ success: false, message: '模板文件不存在，请联系管理员' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.post('/api/import', uploadTemp.single('file'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: '请选择文件' });
-    const wb = xlsx.readFile(req.file.path); const ws = wb.Sheets[wb.SheetNames[0]]; const data = xlsx.utils.sheet_to_json(ws);
-    const db = getDatabase(); let imported=0, skipped=0;
+
+    // 验证 Excel 文件
+    let wb, data;
+    try {
+      wb = xlsx.readFile(req.file.path);
+      if (!wb.Sheets || !wb.SheetNames || !wb.SheetNames[0]) throw new Error();
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      data = xlsx.utils.sheet_to_json(ws);
+    } catch (e) {
+      try { fs.unlinkSync(req.file.path); } catch(ex){}
+      return res.status(400).json({ success: false, message: '文件格式无法识别，请使用 .xlsx 文件' });
+    }
+
+    if (!data || data.length === 0) {
+      try { fs.unlinkSync(req.file.path); } catch(ex){}
+      return res.status(400).json({ success: false, message: 'Excel 文件中没有数据，请确认 Sheet 名称是否正确' });
+    }
+
+    // 检查关键列名是否存在
+    if (!data[0].hasOwnProperty('需求单编号')) {
+      try { fs.unlinkSync(req.file.path); } catch(ex){}
+      const cols = Object.keys(data[0]).join('、');
+      return res.status(400).json({ success: false, message: `未找到"需求单编号"列。当前列名：${cols}。请使用导入模板，列名必须完全一致。` });
+    }
+
+    const db = getDatabase();
+    let orderCount = 0, pointCount = 0, meetingCount = 0, scheduleCount = 0, skipped = 0;
+    const warnings = [];
     const insO = db.prepare('INSERT OR IGNORE INTO requirement_orders (order_number,name,department,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?)');
     const insP = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,system,version) VALUES (?,?,?,?,?)');
+    const insS = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version) VALUES (?,?,?,?,?)');
+    const updP = db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?');
+    const orderSeqs = {};
+    let rowNum = 0;
+
     db.transaction(() => {
       for (const row of data) {
-        const on = row['需求单编号']; if (!on) { skipped++; continue; }
-        if (!/^[A-Z]\d{2}$/.test(String(on))) { skipped++; continue; }
-        const r = insO.run(on, row['需求单名称']||'', row['业务部门']||'', row['提出人']||'', row['提出日期']||'', row['业务上线预期']||'');
-        if (r.changes > 0) imported++; else skipped++;
-        const o = db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(on);
-        if (o && row['需求点描述']) {
-          const descs = String(row['需求点描述']).split(' | '); const sys = String(row['涉及系统']||'').split(' | '); const vers = String(row['上线版本']||'').split(' | ');
-          descs.forEach((d, i) => { if (d.trim()) insP.run(o.id, `${on}-${String(i+1).padStart(2,'0')}`, d.trim(), sys[i]||'', vers[i]||''); });
+        rowNum++;
+        const on = row['需求单编号'];
+        if (!on || !String(on).trim()) { continue; }
+        if (!/^[A-Z]\d{2}$/.test(String(on))) {
+          warnings.push(`第${rowNum}行：需求单编号"${on}"格式不正确（需1大写字母+2数字），已跳过`);
+          skipped++;
+          continue;
+        }
+
+        // --- 1. 创建/匹配需求单 ---
+        const r = insO.run(on, row['需求单名称']||'', row['业务部门']||'', row['提出人']||'', normalizeDate(row['提出日期']), row['业务上线预期']||'');
+        if (r.changes > 0) orderCount++;
+        const order = db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(on);
+        if (!order) continue;
+
+        // --- 2. 创建需求点 ---
+        if (!row['需求点描述']) {
+          warnings.push(`第${rowNum}行：需求单"${on}"缺少"需求点描述"，未创建需求点`);
+          skipped++;
+          continue;
+        }
+
+        const descs = String(row['需求点描述']).split(' | ').filter(d => d.trim());
+        const sysArr = String(row['涉及系统']||'').split(' | ');
+        const verArr = String(row['上线版本']||'').split(' | ');
+
+        // 检查 | 分隔数量是否匹配
+        if (sysArr.length > 1 && sysArr.length !== descs.length) {
+          warnings.push(`第${rowNum}行："涉及系统"数量(${sysArr.length})与"需求点描述"数量(${descs.length})不一致，缺失系统已置空`);
+        }
+        if (verArr.length > 1 && verArr.length !== descs.length) {
+          warnings.push(`第${rowNum}行："上线版本"数量(${verArr.length})与"需求点描述"数量(${descs.length})不一致，缺失版本已置空`);
+        }
+
+        // 初始化序号
+        if (!orderSeqs[on]) {
+          const maxP = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1").get(order.id);
+          orderSeqs[on] = maxP ? parseInt(maxP.point_number.split('-')[1]) + 1 : 1;
+        }
+
+        // 用户指定需求点编号处理
+        const rawPN = row['需求点编号'] ? String(row['需求点编号']).trim() : '';
+        let useManualPN = false;
+        if (rawPN) {
+          const pnMatch = rawPN.match(/^[A-Z]\d{2}-(\d+)$/);
+          if (pnMatch) {
+            const userSeq = parseInt(pnMatch[1]);
+            if (userSeq >= orderSeqs[on]) orderSeqs[on] = userSeq;
+            useManualPN = true;
+          } else {
+            warnings.push(`第${rowNum}行：需求点编号"${rawPN}"格式无效（应为${on}-N格式），已自动生成编号`);
+          }
+        }
+
+        // 创建需求点
+        const createdPoints = [];
+        descs.forEach((d, i) => {
+          const seq = orderSeqs[on]++;
+          const pointNumber = useManualPN && i === 0 ? rawPN : `${on}-${String(seq)}`;
+          const result = insP.run(order.id, pointNumber, d.trim(), sysArr[i]||'', verArr[i]||'');
+          createdPoints.push({ id: result.lastInsertRowid, system: sysArr[i]||'', version: verArr[i]||'' });
+          pointCount++;
+        });
+
+        // --- 3. 创建排期 ---
+        const meetingName = row['CCB会议'] ? String(row['CCB会议']).trim() : '';
+        if (meetingName) {
+          let meeting = db.prepare('SELECT id FROM ccb_meetings WHERE meeting_name=?').get(meetingName);
+          if (!meeting) {
+            db.prepare('INSERT INTO ccb_meetings (meeting_name,meeting_date,notes) VALUES (?,?,?)').run(meetingName, normalizeDate(row['会议日期']), row['会议备注']||'');
+            meeting = db.prepare('SELECT id FROM ccb_meetings WHERE meeting_name=?').get(meetingName);
+            meetingCount++;
+          }
+          createdPoints.forEach(p => {
+            insS.run(meeting.id, order.id, p.id, p.system, p.version);
+            updP.run(p.system, p.version, p.id);
+            scheduleCount++;
+          });
         }
       }
     })();
+
     try { fs.unlinkSync(req.file.path); } catch(e){}
-    res.json({ success: true, data: { imported, skipped } });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+
+    const result = { orderCount, pointCount, meetingCount, scheduleCount, skipped };
+    if (warnings.length > 0) result.warnings = warnings;
+    res.json({ success: true, data: result });
+  } catch (err) {
+    try { fs.unlinkSync(req.file.path); } catch(e){}
+    res.status(500).json({ success: false, message: '导入失败：' + err.message });
+  }
 });
 
 // ---- 参数配置 (JSON文件存储) ----
+
+// 路径配置路由必须在 /api/config/:category 之前注册（避免被通配匹配）
+app.get('/api/config/paths', (req, res) => {
+  try {
+    res.json({ success: true, data: {
+      data_dir: config.getPath('data_dir'),
+      flow_files_dir: config.getPath('flow_files_dir'),
+      meeting_files_dir: config.getPath('meeting_files_dir'),
+      defaults: {
+        data_dir: DATA_DIR,
+        flow_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'flow_files'),
+        meeting_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'meeting_files')
+      }
+    }});
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/config/paths', (req, res) => {
+  try {
+    const { data_dir, flow_files_dir, meeting_files_dir } = req.body || {};
+    if (data_dir !== undefined) config.setPath('data_dir', data_dir);
+    if (flow_files_dir !== undefined) config.setPath('flow_files_dir', flow_files_dir);
+    if (meeting_files_dir !== undefined) config.setPath('meeting_files_dir', meeting_files_dir);
+    // 确保新目录存在
+    if (flow_files_dir && !fs.existsSync(flow_files_dir)) fs.mkdirSync(flow_files_dir, { recursive: true });
+    if (meeting_files_dir && !fs.existsSync(meeting_files_dir)) fs.mkdirSync(meeting_files_dir, { recursive: true });
+    res.json({ success: true, message: '路径设置已保存，部分修改需重启服务后生效' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.get('/api/config/:category', (req, res) => {
   try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }

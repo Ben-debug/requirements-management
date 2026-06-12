@@ -16,7 +16,12 @@ const defaults = {
   department: ['交易中心', '清算部', '交割储运部'],
   version: ['2026年端午版本', '2026年国庆版本', '2027年元旦版本'],
   system: ['业务服务平台', '会员服务平台', '竞价交易系统', '清算系统'],
-  file_type: ['需求服务单', '需求意向书及评估表', '项目需求书']
+  file_type: ['需求服务单', '需求意向书及评估表', '项目需求书'],
+  paths: {
+    data_dir: '',
+    flow_files_dir: '',
+    meeting_files_dir: ''
+  }
 };
 
 function ensureDefaults() {
@@ -82,4 +87,18 @@ function deleteItem(cat, label) {
   return true;
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, load };
+function getPath(name) {
+  const data = load();
+  const paths = data.paths || {};
+  return paths[name] || '';
+}
+
+function setPath(name, value) {
+  const data = load();
+  if (!data.paths) data.paths = {};
+  data.paths[name] = value;
+  save();
+  return true;
+}
+
+module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load };

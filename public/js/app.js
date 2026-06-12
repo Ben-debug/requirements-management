@@ -559,6 +559,12 @@ async function viewOrder(id) {
   // Show related departments
   const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
   document.getElementById('detail-related-depts').innerHTML = rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-';
+  // 填充文件上传的子单批次下拉
+  const batchSel = document.getElementById('file-batch');
+  if (batchSel) {
+    const batches = [...new Set((o.points||[]).map(p => p.sub_batch).filter(b => b))].sort();
+    batchSel.innerHTML = '<option value="">\u6240\u5C5E\u5B50\u5355\uFF08\u9009\u586B\uFF09</option>' + batches.map(b => '<option value="'+b+'">'+o.order_number+'-'+b+'</option>').join('');
+  }
   await loadDropdowns(); renderDetailPoints(o.points||[]); renderFiles(o.files||[]); openModal('detail-modal');
 }
 
@@ -774,7 +780,22 @@ async function deleteScheduleFromDetail(id) { if (!confirm('确定移除？')) r
 function renderFiles(files) {
   const c = document.getElementById('detail-files');
   if (!files.length) { c.innerHTML = '<div class="empty-state"><p>暂无流转文件</p></div>'; return; }
-  c.innerHTML = files.map(f => `<div class="file-item"><div class="file-info"><span class="file-type">${esc(f.file_type)}</span><span>${esc(f.original_name)}</span></div><div class="action-group"><button class="btn btn-sm btn-danger" onclick="deleteFile(${f.id})">删除</button></div></div>`).join('');
+  // 按子单批次分组
+  var grouped = {}, ungrouped = [];
+  files.forEach(function(f) { if (f.sub_batch) { if(!grouped[f.sub_batch]) grouped[f.sub_batch]=[]; grouped[f.sub_batch].push(f); } else ungrouped.push(f); });
+  var html = '', orderNum = document.getElementById('detail-number-display')?.textContent || '';
+  Object.keys(grouped).sort().forEach(function(batch) {
+    html += '<div style="padding:6px 12px;margin:8px 0 4px;background:#f0f5ff;border-radius:4px;font-size:13px;color:#1890ff;font-weight:500">\uD83D\uDCC1 ' + orderNum + '-' + batch + '</div>';
+    grouped[batch].forEach(function(f) { html += fileItemHtml(f); });
+  });
+  if (ungrouped.length) {
+    if (Object.keys(grouped).length) html += '<div style="padding:6px 12px;margin:8px 0 4px;font-size:13px;color:#999;font-weight:500">\uD83D\uDCCE \u901A\u7528\u6587\u4EF6\uFF08\u65E0\u5173\u8054\u5B50\u5355\uFF09</div>';
+    ungrouped.forEach(function(f) { html += fileItemHtml(f); });
+  }
+  c.innerHTML = html;
+}
+function fileItemHtml(f) {
+  return '<div class="file-item"><div class="file-info"><span class="file-type">' + esc(f.file_type) + '</span><span>' + esc(f.original_name) + '</span></div><div class="action-group"><button class="btn btn-sm btn-danger" onclick="deleteFile(' + f.id + ')">\u5220\u9664</button></div></div>';
 }
 
 document.getElementById('point-form')?.addEventListener('submit', async e => {
@@ -834,6 +855,8 @@ async function uploadFile() {
   const oid = document.getElementById('detail-order-id').value, fi = document.getElementById('file-upload'), ft = document.getElementById('file-type').value;
   if (!fi.files.length) { showToast('请选择文件','error'); return; } if (!ft) { showToast('请选择文件类型','error'); return; }
   const fd = new FormData(); fd.append('file',fi.files[0]); fd.append('file_type',ft);
+  const fb = document.getElementById('file-batch')?.value;
+  if (fb) fd.append('sub_batch', fb);
   try { const r = await fetch(`/api/orders/${oid}/files`,{method:'POST',body:fd}); const d = await r.json(); if (!d.success) throw new Error(d.message); showToast('上传成功','success'); fi.value=''; viewOrder(oid); } catch(e) { showToast(e.message,'error'); }
 }
 async function deleteFile(id) { if (!confirm('确定删除？')) return; try { await api(`/api/files/${id}`,{method:'DELETE'}); showToast('已删除','success'); viewOrder(document.getElementById('detail-order-id').value); } catch(e) {} }

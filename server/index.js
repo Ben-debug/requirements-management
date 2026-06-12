@@ -214,7 +214,7 @@ app.post('/api/orders/:orderId/points', (req, res) => {
       const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch=? ORDER BY id DESC LIMIT 1").get(req.params.orderId, sub_batch);
       let seq = 1;
       if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[2]) + 1; }
-      const pointNumber = `${order.order_number}-${sub_batch}-${String(seq)}`;
+      const pointNumber = `${order.order_number}-${sub_batch}-${String(seq).padStart(3,'0')}`;
       const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch);
       res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
     } else {
@@ -222,7 +222,7 @@ app.post('/api/orders/:orderId/points', (req, res) => {
       const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch IS NULL AND point_number NOT LIKE '%-%-%' ORDER BY id DESC LIMIT 1").get(req.params.orderId);
       let seq = 1;
       if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[1]) + 1; }
-      const pointNumber = `${order.order_number}-${String(seq)}`;
+      const pointNumber = `${order.order_number}-${String(seq).padStart(3,'0')}`;
       const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(req.params.orderId, pointNumber, description);
       res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
     }
@@ -238,7 +238,7 @@ app.put('/api/points/:id', (req, res) => {
 app.put('/api/points/:id/number', (req, res) => {
   try {
     const db = getDatabase(); const { point_number } = req.body;
-    if (!point_number || !/^[A-Z]\d{2}(-\d+){1,2}$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01-1 或 A01-1-1）' });
+    if (!point_number || !/^[A-Z]\d{2}(-\d{1,3}){1,2}$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01-001 或 A01-1-001）' });
     const dup = db.prepare('SELECT id FROM requirement_points WHERE point_number=? AND id!=?').get(point_number, req.params.id);
     if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求点使用' });
     const point = db.prepare('SELECT id, order_id FROM requirement_points WHERE id=?').get(req.params.id);
@@ -283,7 +283,8 @@ app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => 
       finalPath = path.join(flowDir, `${base}(${counter++})${ext}`);
     }
     try { fs.copyFileSync(req.file.path, finalPath); fs.unlinkSync(req.file.path); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
-    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, fixedName, path.basename(finalPath), finalPath);
+    const fileBatch = req.body.sub_batch || '';
+    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path,sub_batch) VALUES (?,?,?,?,?,?)').run(req.params.orderId, file_type, fixedName, path.basename(finalPath), finalPath, fileBatch);
     res.json({ success: true, data: { file_name: path.basename(finalPath) } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

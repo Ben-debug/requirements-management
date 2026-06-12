@@ -89,6 +89,7 @@ function initDatabase() {
   `);
   // 兼容性迁移：旧数据库可能缺少新增列
   try { db.exec("ALTER TABLE requirement_points ADD COLUMN sub_batch TEXT"); } catch(e) {}
+  try { db.exec("ALTER TABLE flow_files ADD COLUMN sub_batch TEXT"); } catch(e) {}
   try { db.exec("ALTER TABLE requirement_orders ADD COLUMN background TEXT"); } catch(e) {}
 }
 

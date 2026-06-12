@@ -217,9 +217,11 @@
         <div class="detail-item"><div class="label">关联部门</div><div class="value" id="detail-related-depts"></div></div>
         <div class="detail-item"><div class="label">提出人</div><div class="value" id="detail-proposer"></div></div>
         <div class="detail-item"><div class="label">提出日期</div><div class="value" id="detail-propose-date"></div></div>
-        <div class="detail-item"><div class="label">提出背景</div><div class="value" id="detail-background"></div></div>
         <div class="detail-item"><div class="label">上线预期</div><div class="value" id="detail-launch-date"></div></div>
       </div>
+    </div>
+    <div class="detail-section"><h4>提出背景</h4>
+      <div style="padding:12px 16px;background:#fffbe6;border-radius:6px;border-left:4px solid #faad14;font-size:14px;line-height:1.8;white-space:pre-wrap;word-break:break-all" id="detail-background">—</div>
     </div>
     <div class="detail-section"><h4>需求点详情</h4>
       <button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
@@ -228,6 +230,7 @@
     <div class="detail-section"><h4>流转文件</h4>
       <div class="form-row" style="margin-bottom:12px">
         <div class="form-group"><select id="file-type" class="form-control"></select></div>
+        <div class="form-group"><select id="file-batch" class="form-control" style="min-width:120px"><option value="">所属子单（选填）</option></select></div>
         <div class="form-group"><input type="file" id="file-upload" class="form-control"></div>
         <div class="form-group" style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="uploadFile()" title="上传需求单流转文件。文件名将以【文件类型】开头自动规范命名">上传</button></div>
       </div>

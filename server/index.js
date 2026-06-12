@@ -89,18 +89,35 @@ function paginate(sql, params, page, pageSize) {
 app.get('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
-    const { page=1, pageSize=10, department, keyword, date_from, date_to } = req.query;
+    const { page=1, pageSize=10, department, keyword, date_from, date_to, sort='created_at', order='desc', group_by } = req.query;
     let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
     const params = [];
     if (department) { sql += ' AND department=?'; params.push(department); }
     if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
     if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
     if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
-    sql += ' ORDER BY created_at DESC';
+    // 排序白名单
+    const sortFields = { 'created_at':'created_at', 'order_number':'order_number', 'propose_date':'propose_date', 'department':'department', 'name':'name' };
+    const sortCol = sortFields[sort] || 'created_at';
+    const sortDir = order === 'asc' ? 'ASC' : 'DESC';
+    sql += ` ORDER BY ${sortCol} ${sortDir}`;
     const result = paginate(sql, params, parseInt(page), parseInt(pageSize));
-    // 同时返回筛选条件供前端下拉使用
+    
+    // 分组处理（取全部匹配数据分组，但分页仍按当前页）
+    let grouped = null;
+    if (group_by && group_by === 'department') {
+      const allSql = sql.replace(/LIMIT.*/, '');
+      const allItems = db.prepare(`SELECT * FROM (${sql.replace(/ORDER BY.*$/, '')}) ORDER BY department, ${sortCol} ${sortDir}`).all(...params);
+      grouped = {};
+      allItems.forEach(o => {
+        const key = o.department || '未指定';
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(o);
+      });
+    }
+    
     const departments = config.getCategory('department');
-    res.json({ success: true, ...result, filters: { departments } });
+    res.json({ success: true, ...result, grouped, filters: { departments } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -139,9 +156,19 @@ app.post('/api/orders', (req, res) => {
 app.put('/api/orders/:id', (req, res) => {
   try {
     const db = getDatabase();
-    const { name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
+    const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
+    // 如果修改了编号，检查唯一性
+    if (order_number) {
+      if (!/^[A-Z]\d{2}$/.test(order_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需1大写字母+2数字）' });
+      const dup = db.prepare('SELECT id FROM requirement_orders WHERE order_number=? AND id!=?').get(order_number, req.params.id);
+      if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求单使用' });
+    }
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
-    db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
+    if (order_number) {
+      db.prepare("UPDATE requirement_orders SET order_number=?,name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(order_number, name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
+    } else {
+      db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -213,25 +240,26 @@ app.post('/api/orders/:orderId/files', uploadTemp.single('file'), (req, res) => 
     const name = encodeName(req.file.originalname);
     const order = db.prepare('SELECT order_number, name FROM requirement_orders WHERE id=?').get(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-    // 校验命名规范：文件名应以【文件类型】开头
-    if (!name.startsWith(`【${file_type}】`)) {
-      try { fs.unlinkSync(req.file.path); } catch(e) {}
-      return res.status(400).json({ success: false, message: `文件名必须以"【${file_type}】"开头，正确示例：${'【'+file_type+'】'+order.order_number+'-'+order.name+path.extname(name)}` });
+    // 自动修正文件名：若不以【文件类型】开头，自动按"【类型】编号-名称.扩展名"格式修正
+    let fixedName = name;
+    if (!fixedName.startsWith(`【${file_type}】`)) {
+      fixedName = `【${file_type}】${order.order_number}-${order.name}${path.extname(name)}`;
     }
-    // 按订单ID分目录存储，保持原始文件名
-    const orderDir = path.join(getFlowFileDir(), String(req.params.orderId));
-    if (!fs.existsSync(orderDir)) fs.mkdirSync(orderDir, { recursive: true });
-    const destPath = path.join(orderDir, name);
+    // 以"订单ID-文件名"方式存储到 flow_files 根目录，避免不同订单文件重名
+    const flowDir = getFlowFileDir();
+    if (!fs.existsSync(flowDir)) fs.mkdirSync(flowDir, { recursive: true });
+    const storedName = `${req.params.orderId}-${fixedName}`;
+    const destPath = path.join(flowDir, storedName);
     // 同名文件处理：追加数字后缀
     let finalPath = destPath;
     let counter = 1;
     while (fs.existsSync(finalPath)) {
-      const ext = path.extname(name);
-      const base = path.basename(name, ext);
-      finalPath = path.join(orderDir, `${base}(${counter++})${ext}`);
+      const ext = path.extname(storedName);
+      const base = path.basename(storedName, ext);
+      finalPath = path.join(flowDir, `${base}(${counter++})${ext}`);
     }
     try { fs.copyFileSync(req.file.path, finalPath); fs.unlinkSync(req.file.path); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
-    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, path.basename(finalPath), path.basename(finalPath), finalPath);
+    db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)').run(req.params.orderId, file_type, fixedName, path.basename(finalPath), finalPath);
     res.json({ success: true, data: { file_name: path.basename(finalPath) } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -274,21 +302,22 @@ app.post('/api/meetings/:id/file', uploadTemp.single('file'), (req, res) => {
   try { const db = getDatabase();
     const meeting = db.prepare('SELECT meeting_name FROM ccb_meetings WHERE id=?').get(req.params.id);
     if (!meeting) return res.status(404).json({ success: false, message: '会议不存在' });
-    const name = encodeName(req.file.originalname);
-    // 校验命名规范：文件名应以【会议纪要】开头
+    let name = encodeName(req.file.originalname);
+    // 自动修正文件名：若不以【会议纪要】开头，自动按"【会议纪要】会议名称.扩展名"格式修正
     if (!name.startsWith('【会议纪要】')) {
-      try { fs.unlinkSync(req.file.path); } catch(e) {}
-      return res.status(400).json({ success: false, message: `文件名必须以"【会议纪要】"开头，正确示例：【会议纪要】${meeting.meeting_name}${path.extname(name)}` });
+      name = `【会议纪要】${meeting.meeting_name}${path.extname(name)}`;
     }
-    const meetingDir = path.join(getMeetingFileDir(), String(req.params.id));
+    const meetingDir = getMeetingFileDir();
     if (!fs.existsSync(meetingDir)) fs.mkdirSync(meetingDir, { recursive: true });
-    const destPath = path.join(meetingDir, name);
+    // 以"会议ID-原文件名"方式存储，避免不同会议的文件重名覆盖
+    const storedName = `${req.params.id}-${name}`;
+    const destPath = path.join(meetingDir, storedName);
     // 同名文件处理：追加数字后缀
     let finalPath = destPath;
     let counter = 1;
     while (fs.existsSync(finalPath)) {
-      const ext = path.extname(name);
-      const base = path.basename(name, ext);
+      const ext = path.extname(storedName);
+      const base = path.basename(storedName, ext);
       finalPath = path.join(meetingDir, `${base}(${counter++})${ext}`);
     }
     try { fs.copyFileSync(req.file.path, finalPath); fs.unlinkSync(req.file.path); } catch(e) { return res.status(500).json({ success: false, message: '文件保存失败' }); }
@@ -437,6 +466,12 @@ function normalizeDate(v) {
   if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // 兼容 Excel 序列号（如 46189 → 2026-06-12）
+  const num = Number(v);
+  if (!isNaN(num) && num > 1 && num < 200000) {
+    const d = new Date((num - 25569) * 86400000);
+    if (!isNaN(d.getTime())) return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  }
   return s;
 }
 
@@ -507,7 +542,7 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
       wb = xlsx.readFile(req.file.path);
       if (!wb.Sheets || !wb.SheetNames || !wb.SheetNames[0]) throw new Error();
       const ws = wb.Sheets[wb.SheetNames[0]];
-      data = xlsx.utils.sheet_to_json(ws);
+      data = xlsx.utils.sheet_to_json(ws, {raw: false, defval: ''});
     } catch (e) {
       try { fs.unlinkSync(req.file.path); } catch(ex){}
       return res.status(400).json({ success: false, message: '文件格式无法识别，请使用 .xlsx 文件' });
@@ -628,6 +663,27 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
     try { fs.unlinkSync(req.file.path); } catch(e){}
     res.status(500).json({ success: false, message: '导入失败：' + err.message });
   }
+});
+
+// ---- 目录浏览（供前端文件夹选择器使用） ----
+app.get('/api/config/browse', (req, res) => {
+  try {
+    const dirPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
+    // 安全检查：禁止浏览 node_modules
+    if (dirPath.includes('node_modules')) return res.json({ success: true, data: { current: dirPath, parent: null, subdirs: [] } });
+    if (!fs.existsSync(dirPath)) return res.status(400).json({ success: false, message: '路径不存在' });
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) return res.status(400).json({ success: false, message: '不是目录' });
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
+    const subdirs = items.filter(item => item.isDirectory() && !item.name.startsWith('.')).map(item => item.name).sort();
+    // 计算父目录路径
+    const parent = (() => {
+      const resolved = path.resolve(dirPath);
+      if (resolved === path.parse(resolved).root) return null;
+      return path.dirname(resolved);
+    })();
+    res.json({ success: true, data: { current: path.resolve(dirPath), parent, subdirs } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ---- 参数配置 (JSON文件存储) ----

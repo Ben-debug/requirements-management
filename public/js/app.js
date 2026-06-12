@@ -169,15 +169,20 @@ async function savePaths() {
 
 // ---- Orders with Pagination + Filters ----
 function getFilterParams() {
-  const params = { page: state.orderPage, pageSize: 10 };
-  const kw = document.getElementById('filter-keyword')?.value.trim();
-  if (kw) params.keyword = kw;
+  const pageSize = parseInt(document.getElementById('filter-page-size')?.value) || 10;
+  const params = { page: state.orderPage, pageSize: pageSize > 0 ? pageSize : 10 };
   const dept = document.getElementById('filter-department')?.value;
   if (dept) params.department = dept;
   const df = document.getElementById('filter-date-from')?.value;
   if (df) params.date_from = df;
   const dt = document.getElementById('filter-date-to')?.value;
   if (dt) params.date_to = dt;
+  const sort = document.getElementById('filter-sort')?.value;
+  if (sort) params.sort = sort;
+  const order = document.getElementById('filter-order')?.value;
+  if (order) params.order = order;
+  const group_by = document.getElementById('filter-group-orders')?.value;
+  if (group_by) params.group_by = group_by;
   return params;
 }
 
@@ -190,7 +195,8 @@ async function loadOrders() {
     document.getElementById('filter-result-info').textContent = r.total ? `共 ${r.total} 条` : '';
     const tbody = document.querySelector('#orders-table tbody');
     if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
-    tbody.innerHTML = r.items.map(o => {
+    
+    function orderRow(o) {
       const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
       return `<tr>
       <td><a href="javascript:void(0)" onclick="viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
@@ -199,7 +205,21 @@ async function loadOrders() {
       <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
       <td><div class="action-group"><button class="btn btn-sm" onclick="viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteOrder(${o.id})">删除</button></div></td>
-    </tr>`}).join('');
+    </tr>`;
+    }
+    
+    if (r.grouped) {
+      // 分组展示
+      let html = '';
+      Object.keys(r.grouped).sort().forEach(key => {
+        html += `<tr style="background:#e6f7ff"><td colspan="8" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${r.grouped[key].length}条)</td></tr>`;
+        r.grouped[key].forEach(o => { html += orderRow(o); });
+      });
+      tbody.innerHTML = html;
+    } else {
+      tbody.innerHTML = r.items.map(o => orderRow(o)).join('');
+    }
+    
     renderPagination('orders-pagination', r);
     // 填充筛选部门下拉
     if (r.filters?.departments) {
@@ -211,6 +231,7 @@ async function loadOrders() {
   } catch(e) {}
 }
 
+function onFilterChange() { state.orderPage = 1; loadOrders(); }
 function applyFilters() { state.orderPage = 1; loadOrders(); }
 function resetFilters() {
   document.getElementById('filter-keyword').value = '';
@@ -239,6 +260,7 @@ function gotoSchedulePage(p) { state.schedulePage = p; applyFilter(); }
 
 document.getElementById('order-form')?.addEventListener('submit', async e => {
   e.preventDefault();
+  clearFieldErrors();
   const form = e.target;
   const fd = new FormData(form);
   // Convert FormData to object - handle multiple checkboxes
@@ -251,14 +273,53 @@ document.getElementById('order-form')?.addEventListener('submit', async e => {
       data[key] = val;
     }
   }
-  if (!/^[A-Z]\d{2}$/.test(data.order_number)) { showToast('格式：1大写字母+2数字','error'); return; }
+  // 校验
+  let hasError = false;
+  if (!data.order_number || !/^[A-Z]\d{2}$/.test(data.order_number)) {
+    showFieldError('order_number', '格式：1位大写字母+2位数字（如 A01）');
+    hasError = true;
+  }
+  if (!data.name || !data.name.trim()) {
+    showFieldError('order_name', '请输入需求单名称');
+    hasError = true;
+  }
+  if (!data.department) {
+    showFieldError('department', '请选择业务部门');
+    hasError = true;
+  }
+  if (!data.proposer || !data.proposer.trim()) {
+    showFieldError('proposer', '请输入提出人');
+    hasError = true;
+  }
+  if (!data.propose_date) {
+    showFieldError('propose_date', '请选择提出日期');
+    hasError = true;
+  }
+  if (hasError) return;
   try {
-    if (!state.editingOrderId) { const c = await (await fetch(`/api/orders/check/${data.order_number}`)).json(); if (c.exists) { showToast('编号已存在','error'); return; } }
+    if (!state.editingOrderId) {
+      const c = await (await fetch(`/api/orders/check/${data.order_number}`)).json();
+      if (c.exists) {
+        showFieldError('order_number', '该编号已被使用');
+        return;
+      }
+    }
     const body = JSON.stringify(data);
-    if (state.editingOrderId) { await api(`/api/orders/${state.editingOrderId}`,{method:'PUT',body}); showToast('更新成功','success'); }
-    else { await api('/api/orders',{method:'POST',body}); showToast('创建成功','success'); }
+    if (state.editingOrderId) {
+      const origNum = document.getElementById('order_number').dataset.originalNumber;
+      if (origNum && data.order_number === origNum) delete data.order_number;
+      await api(`/api/orders/${state.editingOrderId}`,{method:'PUT',body});
+      showToast('更新成功','success');
+    } else {
+      await api('/api/orders',{method:'POST',body});
+      showToast('创建成功','success');
+    }
     closeModal('order-modal'); state.editingOrderId = null; loadOrders();
-  } catch(e) { showToast(e.message||'保存失败','error'); }
+  } catch(e) {
+    const msg = e.message || '';
+    if (msg.includes('编号')) showFieldError('order_number', msg);
+    else showToast(msg||'保存失败','error');
+  }
 });
 
 function updatePointBatchPreview() {
@@ -278,8 +339,80 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sb) sb.addEventListener('input', updatePointBatchPreview);
 });
 
+// ---- 全局搜索 ----
+let searchTimeout = null;
+document.addEventListener('DOMContentLoaded', () => {
+  const searchInput = document.getElementById('global-search');
+  if (!searchInput) return;
+  searchInput.addEventListener('input', function(e) {
+    clearTimeout(searchTimeout);
+    const kw = e.target.value.trim();
+    const resultsEl = document.getElementById('global-search-results');
+    if (!kw) { resultsEl.classList.remove('show'); resultsEl.innerHTML = ''; return; }
+    searchTimeout = setTimeout(() => doGlobalSearch(kw), 300);
+  });
+  searchInput.addEventListener('focus', function(e) {
+    if (e.target.value.trim()) {
+      document.getElementById('global-search-results').classList.add('show');
+    }
+  });
+  // 点击外部关闭搜索下拉
+  document.addEventListener('click', function(e) {
+    const container = document.getElementById('nav-search-container');
+    if (container && !container.contains(e.target)) {
+      document.getElementById('global-search-results').classList.remove('show');
+    }
+  });
+});
+
+async function doGlobalSearch(keyword) {
+  const resultsEl = document.getElementById('global-search-results');
+  resultsEl.innerHTML = '<div class="search-loading">搜索中...</div>';
+  resultsEl.classList.add('show');
+  try {
+    const r = await api('/api/search?keyword=' + encodeURIComponent(keyword));
+    const data = r.data;
+    if (!data || !data.length) {
+      resultsEl.innerHTML = '<div class="search-empty">🔍 未找到匹配结果</div>';
+      return;
+    }
+    let html = '';
+    data.forEach(o => {
+      html += '<div class="search-dropdown-header">';
+      html += '<span class="order-number">' + esc(o.order_number) + '</span>';
+      html += '<span class="order-name">' + esc(o.name) + '</span>';
+      html += ' <span style="font-size:11px;color:#999">[' + esc(o.department||'-') + ']</span>';
+      html += '</div>';
+      
+      if (o.matchedPoints && o.matchedPoints.length) {
+        o.matchedPoints.forEach(p => {
+          const systems = p.schedule_system ? p.schedule_system.split(',').filter(Boolean) : [];
+          const scheduled = p.schedule_system ? '✅ ' + systems.map(s=>esc(s.trim())).join(',') + ' | ' + esc(p.schedule_version||'') : '⏳ 待排期';
+          html += '<div class="search-dropdown-item" onclick="closeSearchAndView(' + o.id + ')">';
+          html += '<div class="point-item"><span class="pt-num">' + esc(p.point_number) + '</span> ' + esc(p.description.substring(0,60)) + (p.description.length>60?'...':'') + '</div>';
+          html += '<div style="font-size:11px;color:#999;margin-top:2px">' + scheduled + '</div>';
+          html += '</div>';
+        });
+      } else {
+        html += '<div class="search-dropdown-item" onclick="closeSearchAndView(' + o.id + ')">';
+        html += '<div style="font-size:13px;color:#999">(无需求点)</div></div>';
+      }
+    });
+    resultsEl.innerHTML = html;
+  } catch(e) {
+    resultsEl.innerHTML = '<div class="search-empty">搜索出错</div>';
+  }
+}
+
+function closeSearchAndView(orderId) {
+  document.getElementById('global-search-results').classList.remove('show');
+  document.getElementById('global-search').value = '';
+  navigate('orders');
+  setTimeout(() => viewOrder(orderId), 100);
+}
+
 function showCreateOrder() { state.editingOrderId = null; document.getElementById('order-modal-title').textContent = '新建需求单'; document.getElementById('order-form').reset(); document.getElementById('order_number').disabled = false; loadDropdowns(); loadRelatedDeptCheckboxes([]); openModal('order-modal'); }
-async function editOrder(id) { state.editingOrderId = id; const o = (await api(`/api/orders/${id}`)).data; document.getElementById('order-modal-title').textContent = '编辑需求单'; document.getElementById('order_number').value = o.order_number; document.getElementById('order_number').disabled = true; document.getElementById('order_name').value = o.name; await loadDropdowns(); document.getElementById('department').value = o.department||''; document.getElementById('proposer').value = o.proposer||''; document.getElementById('propose_date').value = o.propose_date||''; document.getElementById('background').value = o.background||''; document.getElementById('business_launch_date').value = o.business_launch_date||''; const rds = o.related_departments ? o.related_departments.split(',').map(s=>s.trim()).filter(Boolean) : []; loadRelatedDeptCheckboxes(rds); openModal('order-modal'); }
+async function editOrder(id) { state.editingOrderId = id; const o = (await api(`/api/orders/${id}`)).data; document.getElementById('order-modal-title').textContent = '编辑需求单'; document.getElementById('order_number').value = o.order_number; document.getElementById('order_number').dataset.originalNumber = o.order_number; document.getElementById('order_number').disabled = false; document.getElementById('order_name').value = o.name; await loadDropdowns(); document.getElementById('department').value = o.department||''; document.getElementById('proposer').value = o.proposer||''; document.getElementById('propose_date').value = o.propose_date||''; document.getElementById('background').value = o.background||''; document.getElementById('business_launch_date').value = o.business_launch_date||''; const rds = o.related_departments ? o.related_departments.split(',').map(s=>s.trim()).filter(Boolean) : []; loadRelatedDeptCheckboxes(rds); openModal('order-modal'); }
 async function deleteOrder(id) { if (!confirm('确定删除？')) return; try { await api(`/api/orders/${id}`,{method:'DELETE'}); showToast('已删除','success'); loadOrders(); } catch(e) {} }
 
 // ---- Detail ----
@@ -296,6 +429,88 @@ function loadRelatedDeptCheckboxes(selected) {
     ).join('');
   }).catch(() => {});
 }
+// ---- 文件夹选择器 ----
+let folderPickerTarget = null;
+
+async function openFolderPicker(targetInputId) {
+  folderPickerTarget = targetInputId;
+  document.getElementById('folder-picker-target').value = targetInputId;
+  const currentPath = document.getElementById(targetInputId).value || 
+    document.getElementById(targetInputId).placeholder || 
+    (navigator.platform.includes('Win') ? 'C:\\' : '/');
+  await browseDir(currentPath);
+  openModal('folder-picker-modal');
+}
+
+async function browseDir(dirPath) {
+  try {
+    const r = await fetch('/api/config/browse?path=' + encodeURIComponent(dirPath));
+    const d = await r.json();
+    if (!d.success) { showToast(d.message, 'error'); return; }
+    const data = d.data;
+    document.getElementById('folder-picker-current').textContent = '📂 ' + data.current;
+    
+    // 上级目录按钮
+    const upBtn = document.getElementById('folder-picker-up-btn');
+    upBtn.style.display = data.parent ? 'inline-flex' : 'none';
+    upBtn.onclick = () => browseDir(data.parent);
+    
+    // 选择当前文件夹按钮
+    document.getElementById('folder-picker-select-btn').onclick = () => {
+      document.getElementById(folderPickerTarget).value = data.current;
+      document.getElementById('folder-picker-target').value = '';
+      document.getElementById('path-save-status').textContent = '⚠️ 已修改，点击保存';
+      closeModal('folder-picker-modal');
+    };
+    
+    // 子目录列表
+    const list = document.getElementById('folder-picker-list');
+    if (!data.subdirs.length) {
+      list.innerHTML = '<div style="padding:20px;text-align:center;color:#999">(空目录，无子文件夹)</div>';
+      return;
+    }
+    var html = '';
+    data.subdirs.forEach(function(dir) {
+      var safePath = (data.current + '/' + dir).replace(/\\/g,'/');
+      html += '<div class="folder-picker-item" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px" onclick="browseDir(\'' + safePath + '\')" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'\'">';
+      html += '<span style="font-size:16px">📁</span> <span style="font-size:14px">' + esc(dir) + '</span></div>';
+    });
+    list.innerHTML = html;
+  } catch(e) { showToast('无法读取目录', 'error'); }
+}
+
+// ---- 表单内联校验 ----
+function showFieldError(fieldId, message) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.style.borderColor = '#ff4d4f';
+  el.style.boxShadow = '0 0 0 2px rgba(255,77,79,.2)';
+  // 查找或创建错误提示元素
+  let errEl = el.nextElementSibling;
+  if (!errEl || !errEl.classList.contains('field-error')) {
+    errEl = document.createElement('div');
+    errEl.className = 'field-error';
+    errEl.style.cssText = 'font-size:12px;color:#ff4d4f;margin-top:4px';
+    el.parentNode.insertBefore(errEl, el.nextSibling);
+  }
+  errEl.textContent = '❌ ' + message;
+}
+
+function clearFieldErrors() {
+  document.querySelectorAll('.field-error').forEach(el => el.remove());
+  document.querySelectorAll('.form-control').forEach(el => {
+    el.style.borderColor = '';
+    el.style.boxShadow = '';
+  });
+}
+
+// 表单提交时自动清除旧错误
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('form').forEach(form => {
+    form.addEventListener('submit', clearFieldErrors);
+  });
+});
+
 function onDeptChange() {
   loadRelatedDeptCheckboxes([]);
 }
@@ -794,6 +1009,18 @@ function renderScheduleResults(result) {
 
 document.getElementById('filter-group')?.addEventListener('change', () => { state.schedulePage = 1; applyFilter(); });
 function exportExcel() { window.open("/api/export","_blank"); showToast("正在导出...","info"); }
+function exportFiltered() {
+  const params = getFilterParams();
+  delete params.page;
+  delete params.pageSize;
+  const qs = Object.entries(params).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
+  if (qs) {
+    window.open(`/api/export/filtered?${qs}`,'_blank');
+  } else {
+    window.open('/api/export','_blank');
+  }
+  showToast('正在导出...','info');
+}
 
 function importExcel() { document.getElementById('import-file').click(); }
 function downloadTemplate() { window.open('/api/import/template','_blank'); }

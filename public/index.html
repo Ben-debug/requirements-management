@@ -18,39 +18,69 @@
     <div class="nav-item" data-page="schedules" onclick="navigate('schedules')">🔍 排期信息筛选</div>
     <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
   </div>
+  <div class="nav-search" id="nav-search-container">
+    <input type="text" id="global-search" placeholder="🔍 全局搜索编号/名称/提出人/需求点..." autocomplete="off">
+    <div id="global-search-results" class="search-dropdown"></div>
+  </div>
 </nav>
 
 <main class="main-content">
 <!-- Orders Page -->
 <div id="page-orders" class="page-content" style="display:block">
-  <div class="page-header">
-    <h2>📄 需求单管理</h2>
-    <p>点击需求单编号查看详情。支持条件筛选、Excel导入导出</p>
+  <!-- 标题行 + 操作按钮 -->
+  <div class="orders-header">
+    <div class="orders-header-left">
+      <h2>📄 需求单管理</h2>
+      <span id="filter-result-info" style="font-size:13px;color:#999"></span>
+    </div>
+    <div class="orders-header-right">
+      <button class="btn btn-primary btn-sm" onclick="showCreateOrder()" title="创建一个新的需求单，填写编号、名称、部门、提出人等信息">📄 新建</button>
+      <button class="btn btn-success btn-sm" onclick="importExcel()" title="从 Excel 文件批量导入需求单。使用前请先下载模板，按模板格式填写">📥 导入</button>
+      <button class="btn btn-sm" onclick="downloadTemplate()" title="下载导入模板">📋 模板</button>
+      <div class="btn-group">
+        <button class="btn btn-export btn-sm" onclick="exportFiltered()" title="导出需求单到 Excel。若已设置筛选条件，只导出匹配结果；否则导出全部">📤 导出</button>
+      </div>
+      <input type="file" id="import-file" class="hidden-input" accept=".xlsx,.xls">
+    </div>
   </div>
-  <!-- 筛选栏 -->
-  <div class="filter-bar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:12px 16px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)">
-    <input type="text" id="filter-keyword" placeholder="🔍 搜索编号/名称/提出人" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;min-width:200px">
-    <select id="filter-department" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;min-width:120px">
+
+  <!-- 一体化筛选栏 -->
+  <div class="filter-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:8px 12px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)">
+    <select id="filter-department" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
       <option value="">全部部门</option>
     </select>
-    <input type="date" id="filter-date-from" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px">
-    <span style="color:#999">—</span>
-    <input type="date" id="filter-date-to" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px">
-    <button class="btn btn-primary btn-sm" onclick="applyFilters()">🔍 查询</button>
-    <button class="btn btn-sm" onclick="resetFilters()">↻ 重置</button>
-    <span id="filter-result-info" style="font-size:13px;color:#999;margin-left:4px"></span>
+    <input type="date" id="filter-date-from" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
+    <span style="color:#999;font-size:12px">~</span>
+    <input type="date" id="filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
+    <button class="btn btn-primary btn-sm" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
+    <button class="btn btn-sm" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
+    <span class="filter-sep"></span>
+    <span style="font-size:12px;color:#999">排序</span>
+    <select id="filter-sort" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="created_at">创建时间</option>
+      <option value="order_number">编号</option>
+      <option value="propose_date">提出日期</option>
+      <option value="department">部门</option>
+      <option value="name">名称</option>
+    </select>
+    <select id="filter-order" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="desc">降序</option>
+      <option value="asc">升序</option>
+    </select>
+    <span style="font-size:12px;color:#999">分组</span>
+    <select id="filter-group-orders" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="">不分组</option>
+      <option value="department">按部门</option>
+    </select>
+    <span style="font-size:12px;color:#999">每页</span>
+    <select id="filter-page-size" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="10">10</option>
+      <option value="20">20</option>
+      <option value="50">50</option>
+      <option value="100">100</option>
+    </select>
   </div>
-  <!-- 操作栏 -->
-  <div class="toolbar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
-    <button class="btn btn-primary" onclick="showCreateOrder()">📄 新建需求单</button>
-    <button class="btn btn-success" onclick="importExcel()">📥 批量导入</button>
-    <button class="btn" onclick="downloadTemplate()" title="下载导入模板">📋 下载模板</button>
-    <span style="flex:1"></span>
-    <button class="btn btn-export" onclick="exportExcel()">📤 导出全部</button>
-    <button class="btn btn-export" onclick="exportFiltered()" id="btn-export-filtered" style="opacity:0.7">📤 导出筛选结果</button>
-    <input type="file" id="import-file" class="hidden-input" accept=".xlsx,.xls">
-  </div>
-  <div id="search-results" class="search-results-container"></div>
+
   <div class="table-container">
     <table id="orders-table"><thead><tr>
       <th>需求单编号</th><th>名称</th><th>提出部门</th><th>关联部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>操作</th>
@@ -62,7 +92,7 @@
 <!-- Meetings Page -->
 <div id="page-meetings" class="page-content" style="display:none">
   <div class="page-header"><h2>📅 CCB排期管理</h2><p>管理CCB会议记录，为需求点进行排期</p></div>
-  <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()">＋ 新建CCB会议</button></div>
+  <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个CCB会议记录，填写会议名称和日期，后续在会议中进行需求点排期">＋ 新建CCB会议</button></div>
   <div id="meetings-list"></div>
 </div>
 
@@ -75,7 +105,7 @@
       <select id="filter-department"><option value="">全部部门</option></select>
       <select id="filter-meeting"><option value="">全部会议</option></select>
       <select id="filter-system"><option value="">全部系统</option></select>
-      <button class="btn btn-primary" onclick="applyFilter()">🔍 查询</button>
+      <button class="btn btn-primary" onclick="applyFilter()" title="按版本、部门、会议、系统等条件筛选排期信息">🔍 查询</button>
       <button class="btn" onclick="resetFilter()">↻ 重置</button>
       <select id="filter-group" style="margin-left:auto">
         <option value="version" selected>按版本分组</option>
@@ -128,24 +158,33 @@
         <div><span style="font-size:12px;color:#999;margin-right:12px" id="path-save-status"></span><span class="arrow">▼</span></div>
       </div>
       <div class="config-group-body" id="config-body-paths">
-        <p style="font-size:13px;color:#999;margin-bottom:12px">修改后立即生效，data目录变更需重启服务。留空表示使用默认路径。</p>
-        <div class="form-group">
-          <label>数据存储目录</label>
-          <input type="text" id="path-data-dir" class="form-control" placeholder="data/" onchange="onPathChange()">
-          <div class="form-hint">数据库和配置文件的存储位置</div>
-        </div>
-        <div class="form-group">
-          <label>需求单流转文件目录</label>
-          <input type="text" id="path-flow-files" class="form-control" placeholder="public/uploads/flow_files/" onchange="onPathChange()">
-          <div class="form-hint">需求单上传的流转文件</div>
-        </div>
-        <div class="form-group">
-          <label>CCB纪要文件目录</label>
-          <input type="text" id="path-meeting-files" class="form-control" placeholder="public/uploads/meeting_files/" onchange="onPathChange()">
-          <div class="form-hint">CCB会议纪要文件</div>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="savePaths()">保存路径设置</button>
-      </div>
+	        <p style="font-size:13px;color:#999;margin-bottom:12px">修改后立即生效，data目录变更需重启服务。留空表示使用默认路径。</p>
+	        <div class="form-group">
+	          <label>数据存储目录</label>
+	          <div style="display:flex;gap:8px">
+	            <input type="text" id="path-data-dir" class="form-control" placeholder="data/" onchange="onPathChange()" readonly style="background:#fafafa;cursor:pointer" onclick="openFolderPicker('path-data-dir')">
+	            <button type="button" class="btn btn-sm" onclick="openFolderPicker('path-data-dir')" title="浏览并选择数据库和配置文件的存储目录">📁 选择</button>
+	          </div>
+	          <div class="form-hint">数据库和配置文件的存储位置</div>
+	        </div>
+	        <div class="form-group">
+	          <label>需求单流转文件目录</label>
+	          <div style="display:flex;gap:8px">
+	            <input type="text" id="path-flow-files" class="form-control" placeholder="public/uploads/flow_files/" onchange="onPathChange()" readonly style="background:#fafafa;cursor:pointer" onclick="openFolderPicker('path-flow-files')">
+	            <button type="button" class="btn btn-sm" onclick="openFolderPicker('path-flow-files')" title="浏览并选择需求单流转文件的存储目录">📁 选择</button>
+	          </div>
+	          <div class="form-hint">需求单上传的流转文件</div>
+	        </div>
+	        <div class="form-group">
+	          <label>CCB纪要文件目录</label>
+	          <div style="display:flex;gap:8px">
+	            <input type="text" id="path-meeting-files" class="form-control" placeholder="public/uploads/meeting_files/" onchange="onPathChange()" readonly style="background:#fafafa;cursor:pointer" onclick="openFolderPicker('path-meeting-files')">
+	            <button type="button" class="btn btn-sm" onclick="openFolderPicker('path-meeting-files')" title="浏览并选择CCB会议纪要文件的存储目录">📁 选择</button>
+	          </div>
+	          <div class="form-hint">CCB会议纪要文件</div>
+	        </div>
+	        <button class="btn btn-primary btn-sm" onclick="savePaths()" title="保存路径设置。修改 data 目录需重启服务生效，文件目录修改立即生效">保存路径设置</button>
+	      </div>
     </div>
   </div>
 </div>
@@ -167,7 +206,7 @@
     <div class="form-group"><label>关联部门（可多选，非必填）</label><div id="related-departments" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:36px"></div></div></div>
     <div class="form-row"><div class="form-group"><label>提出人 <span class="required">*</span></label><input type="text" id="proposer" name="proposer" class="form-control" required></div>
     <div class="form-group"><label>提出日期 <span class="required">*</span></label><input type="date" id="propose_date" name="propose_date" class="form-control" required></div></div>
-    <div class="form-group"><label>提出背景 <span class="required">*</span></label><textarea id="background" name="background" class="form-control" required placeholder="说明提出该需求的原因、背景和期望达到的业务目标"></textarea></div>
+    <div class="form-group"><label>提出背景 <span class="required">*</span></label><textarea id="background" name="background" class="form-control" placeholder="说明提出该需求的原因、背景和期望达到的业务目标（选填）"></textarea></div>
     <div class="form-row"><div class="form-group"><label>上线预期 <span class="required">*</span></label><input type="text" id="business_launch_date" name="business_launch_date" class="form-control" placeholder="日期或文字" required></div>
     <div class="form-group"></div></div>
   </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('order-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
@@ -190,14 +229,14 @@
       </div>
     </div>
     <div class="detail-section"><h4>需求点详情</h4>
-      <button class="btn btn-primary btn-sm" onclick="showAddPoint()">＋ 添加</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
       <div id="detail-points" class="points-list"></div>
     </div>
     <div class="detail-section"><h4>流转文件</h4>
       <div class="form-row" style="margin-bottom:12px">
         <div class="form-group"><select id="file-type" class="form-control"></select></div>
         <div class="form-group"><input type="file" id="file-upload" class="form-control"></div>
-        <div class="form-group" style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="uploadFile()">上传</button></div>
+        <div class="form-group" style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="uploadFile()" title="上传需求单流转文件。文件名将以【文件类型】开头自动规范命名">上传</button></div>
       </div>
       <div id="detail-files" class="file-list"></div>
     </div>
@@ -242,7 +281,7 @@
     <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="detail-schedule-version" class="form-control"></select></div>
     <input type="hidden" id="schedule-point-id"><input type="hidden" id="schedule-order-id">
   </div>
-  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('quick-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmQuickSchedule()">确认排期</button></div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('quick-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmQuickSchedule()" title="确认将当前需求点排入所选CCB会议，并指定涉及系统和上线版本">确认排期</button></div>
 </div></div>
 
 <!-- Meeting Modal -->
@@ -252,7 +291,7 @@
     <div class="form-row"><div class="form-group"><label>会议名称 <span class="required">*</span></label><input type="text" id="meeting_name" name="meeting_name" class="form-control" required></div>
     <div class="form-group"><label>日期 <span class="required">*</span></label><input type="date" id="meeting_date" name="meeting_date" class="form-control" required></div></div>
     <div class="form-group"><label>备注</label><textarea id="meeting_notes" name="notes" class="form-control"></textarea></div>
-    <div class="form-group"><label>纪要文件</label><div class="form-row"><input type="file" id="meeting-file-upload" class="form-control"><button type="button" class="btn btn-primary" onclick="uploadMeetingFile()">上传</button></div></div>
+    <div class="form-group"><label>纪要文件</label><div class="form-row"><input type="file" id="meeting-file-upload" class="form-control"><button type="button" class="btn btn-primary" onclick="uploadMeetingFile()" title="上传CCB会议纪要文件。文件名将以【会议纪要】开头自动规范命名">上传</button></div></div>
   </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('meeting-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
 </div></div>
 
@@ -300,7 +339,7 @@
     <input type="hidden" id="batch-schedule-order-id">
     <input type="hidden" id="batch-schedule-batch">
   </div>
-  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('batch-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmBatchSchedule()">确认整批排期</button></div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('batch-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmBatchSchedule()" title="确认将该子单批次下所有需求点排入所选CCB会议，整批使用相同的系统和版本">确认整批排期</button></div>
 </div></div>
 
 <!-- Config Add Modal -->
@@ -308,6 +347,20 @@
   <div class="modal-header"><h3 id="config-modal-title">添加配置项</h3><button class="modal-close" onclick="closeModal('config-modal')">×</button></div>
   <div class="modal-body"><div class="form-group"><label id="config-label-text">名称 <span class="required">*</span></label><input type="text" id="config-item-input" class="form-control"></div><input type="hidden" id="config-category-input"></div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('config-modal')">取消</button><button type="button" class="btn btn-primary" onclick="addConfigItem()">保存</button></div>
+</div></div>
+
+<!-- Folder Picker Modal -->
+<div id="folder-picker-modal" class="modal-overlay"><div class="modal" style="max-width:600px">
+  <div class="modal-header"><h3>📁 选择文件夹</h3><button class="modal-close" onclick="closeModal('folder-picker-modal')">×</button></div>
+  <div class="modal-body">
+    <div style="margin-bottom:12px;font-size:13px;color:#666;word-break:break-all" id="folder-picker-current"></div>
+    <div style="border:1px solid #d9d9d9;border-radius:6px;max-height:300px;overflow-y:auto" id="folder-picker-list"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" class="btn btn-sm" id="folder-picker-up-btn">⬆ 上级目录</button>
+      <button type="button" class="btn btn-primary btn-sm" id="folder-picker-select-btn" title="确认使用当前显示的文件夹路径">✅ 选择当前文件夹</button>
+    </div>
+    <input type="hidden" id="folder-picker-target">
+  </div>
 </div></div>
 
 <footer class="app-footer">

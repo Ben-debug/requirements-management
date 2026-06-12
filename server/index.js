@@ -148,7 +148,8 @@ app.post('/api/orders', (req, res) => {
     const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
     if (db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(order_number)) return res.status(400).json({ success: false, message: '编号已存在' });
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
-    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date,background) VALUES (?,?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, propose_date, business_launch_date, background);
+    const nd = normalizeDate(propose_date);
+    const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date,background) VALUES (?,?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, nd, business_launch_date, background);
     res.json({ success: true, data: { id: r.lastInsertRowid } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -165,9 +166,11 @@ app.put('/api/orders/:id', (req, res) => {
     }
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
     if (order_number) {
-      db.prepare("UPDATE requirement_orders SET order_number=?,name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(order_number, name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
+      const nd = normalizeDate(propose_date);
+      db.prepare("UPDATE requirement_orders SET order_number=?,name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(order_number, name, department, rds, proposer, nd, business_launch_date, background, req.params.id);
     } else {
-      db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, propose_date, business_launch_date, background, req.params.id);
+      const nd = normalizeDate(propose_date);
+      db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, nd, business_launch_date, background, req.params.id);
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -466,7 +469,14 @@ function normalizeDate(v) {
   if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  // 兼容 Excel 序列号（如 46189 → 2026-06-12）
+  // 兼容 Excel M/D/YY 或 M/D/YYYY 格式（如 5/26/26、5/26/2026）
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (m) {
+    let y = parseInt(m[3]);
+    if (y < 100) y += y < 50 ? 2000 : 1900;
+    return `${y}-${pad2(parseInt(m[1]))}-${pad2(parseInt(m[2]))}`;
+  }
+  // 兼容 Excel 序列号（如 46185 → 2026-06-12）
   const num = Number(v);
   if (!isNaN(num) && num > 1 && num < 200000) {
     const d = new Date((num - 25569) * 86400000);

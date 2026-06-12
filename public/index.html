@@ -34,11 +34,11 @@
       <span id="filter-result-info" style="font-size:13px;color:#999"></span>
     </div>
     <div class="orders-header-right">
-      <button class="btn btn-primary btn-sm" onclick="showCreateOrder()" title="创建一个新的需求单，填写编号、名称、部门、提出人等信息">📄 新建</button>
-      <button class="btn btn-success btn-sm" onclick="importExcel()" title="从 Excel 文件批量导入需求单。使用前请先下载模板，按模板格式填写">📥 导入</button>
-      <button class="btn btn-sm" onclick="downloadTemplate()" title="下载导入模板">📋 模板</button>
+      <button class="btn btn-primary" onclick="showCreateOrder()" title="创建一个新的需求单，填写编号、名称、部门、提出人等信息">📄 新建</button>
+      <button class="btn btn-success" onclick="importExcel()" title="从 Excel 文件批量导入需求单。使用前请先下载模板，按模板格式填写">📥 导入</button>
+      <button class="btn" onclick="downloadTemplate()" title="下载导入模板">📋 模板</button>
       <div class="btn-group">
-        <button class="btn btn-export btn-sm" onclick="exportFiltered()" title="导出需求单到 Excel。若已设置筛选条件，只导出匹配结果；否则导出全部">📤 导出</button>
+        <button class="btn btn-export" onclick="exportFiltered()" title="导出需求单到 Excel。若已设置筛选条件，只导出匹配结果；否则导出全部">📤 导出</button>
       </div>
       <input type="file" id="import-file" class="hidden-input" accept=".xlsx,.xls">
     </div>
@@ -52,8 +52,8 @@
     <input type="date" id="filter-date-from" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
     <span style="color:#999;font-size:12px">~</span>
     <input type="date" id="filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
-    <button class="btn btn-primary btn-sm" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
-    <button class="btn btn-sm" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
+    <button class="btn btn-primary" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
+    <button class="btn" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
     <span class="filter-sep"></span>
     <span style="font-size:12px;color:#999">排序</span>
     <select id="filter-sort" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
@@ -106,7 +106,7 @@
       <select id="filter-meeting"><option value="">全部会议</option></select>
       <select id="filter-system"><option value="">全部系统</option></select>
       <button class="btn btn-primary" onclick="applyFilter()" title="按版本、部门、会议、系统等条件筛选排期信息">🔍 查询</button>
-      <button class="btn" onclick="resetFilter()">↻ 重置</button>
+      <button class="btn btn-sm" onclick="resetFilter()">↻ 重置</button>
       <select id="filter-group" style="margin-left:auto">
         <option value="version" selected>按版本分组</option>
         <option value="">不分组</option>
@@ -183,7 +183,7 @@
 	          </div>
 	          <div class="form-hint">CCB会议纪要文件</div>
 	        </div>
-	        <button class="btn btn-primary btn-sm" onclick="savePaths()" title="保存路径设置。修改 data 目录需重启服务生效，文件目录修改立即生效">保存路径设置</button>
+	        <button class="btn btn-primary" onclick="savePaths()" title="保存路径设置。修改 data 目录需重启服务生效，文件目录修改立即生效">保存路径设置</button>
 	      </div>
     </div>
   </div>
@@ -229,7 +229,7 @@
       </div>
     </div>
     <div class="detail-section"><h4>需求点详情</h4>
-      <button class="btn btn-primary btn-sm" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
+      <button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
       <div id="detail-points" class="points-list"></div>
     </div>
     <div class="detail-section"><h4>流转文件</h4>

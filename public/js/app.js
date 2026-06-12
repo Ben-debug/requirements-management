@@ -44,7 +44,7 @@ async function loadDropdowns() {
     fillSelect('detail-schedule-version', vers.data, '请选择版本');
     fillSelect('edit-schedule-version', vers.data, '请选择版本');
     fillSelect('file-type', ftypes.data, '选择文件类型');
-  } catch(e) {}
+  } catch(e) { console.error("loadOrders error:", e); }
 }
 
 function fillSelect(id, items, placeholder) {
@@ -130,7 +130,7 @@ async function loadPaths() {
     document.getElementById('path-data-dir').placeholder = p.defaults?.data_dir || 'data/';
     document.getElementById('path-flow-files').placeholder = p.defaults?.flow_files_dir || 'public/uploads/flow_files/';
     document.getElementById('path-meeting-files').placeholder = p.defaults?.meeting_files_dir || 'public/uploads/meeting_files/';
-  } catch(e) {}
+  } catch(e) { console.error("loadOrders error:", e); }
   document.getElementById('path-save-status').textContent = '';
 }
 
@@ -187,6 +187,7 @@ function getFilterParams() {
 }
 
 async function loadOrders() {
+  console.log("loadOrders() called");
   try {
     const params = getFilterParams();
     const qs = Object.entries(params).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
@@ -197,6 +198,7 @@ async function loadOrders() {
     if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
     
     function orderRow(o) {
+  console.log("orderRow called for", o.id, o.order_number);
       const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
       // 计算排期状态
       var schedCount = (o.schedule_summary||{}).scheduled || 0, totalPoints = (o.schedule_summary||{}).total || 0;
@@ -240,7 +242,7 @@ async function loadOrders() {
         r.filters.departments.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
       }
     }
-  } catch(e) {}
+  } catch(e) { console.error("loadOrders error:", e); }
 
 function resetFilters() {
   document.getElementById('filter-department').value = '';

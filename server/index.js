@@ -22,7 +22,7 @@ if (customDataDir) {
   initDataDir(customDataDir);
   if (!fs.existsSync(customDataDir)) fs.mkdirSync(customDataDir, { recursive: true });
 }
-app.use(express.static(path.join(ROOT_DIR, 'public')));
+app.use(express.static(path.join(ROOT_DIR, 'public'), { maxAge: 0, etag: false }));
 
 // ---- 提供首页 ----
 app.get('/', (req, res) => {
@@ -221,8 +221,11 @@ app.post('/api/orders/:orderId/points', (req, res) => {
       // 无批次号 → 传统模式：编号 A01-1
       const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch IS NULL AND point_number NOT LIKE '%-%-%' ORDER BY id DESC LIMIT 1").get(req.params.orderId);
       let seq = 1;
-      if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[1]) + 1; }
-      const pointNumber = `${order.order_number}-${String(seq).padStart(3,'0')}`;
+      if (max) {
+        const m = max.point_number.match(/(\d{3})$/);
+        seq = m ? parseInt(m[1]) + 1 : 1;
+      }
+      const pointNumber = `${order.order_number}${String(seq).padStart(3,'0')}`;
       const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(req.params.orderId, pointNumber, description);
       res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
     }
@@ -238,7 +241,7 @@ app.put('/api/points/:id', (req, res) => {
 app.put('/api/points/:id/number', (req, res) => {
   try {
     const db = getDatabase(); const { point_number } = req.body;
-    if (!point_number || !/^[A-Z]\d{2}(-\d{1,3}){1,2}$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01-001 或 A01-1-001）' });
+    if (!point_number || !/^[A-Z]\d{2}(-\d{1,3}(-\d{1,3})?|\d{3})$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01001 或 A01-1-001）' });
     const dup = db.prepare('SELECT id FROM requirement_points WHERE point_number=? AND id!=?').get(point_number, req.params.id);
     if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求点使用' });
     const point = db.prepare('SELECT id, order_id FROM requirement_points WHERE id=?').get(req.params.id);
@@ -641,7 +644,7 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         // 初始化序号
         if (!orderSeqs[on]) {
           const maxP = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1").get(order.id);
-          orderSeqs[on] = maxP ? parseInt(maxP.point_number.split('-')[1]) + 1 : 1;
+          orderSeqs[on] = maxP ? (parseInt((maxP.point_number.match(/\d+$/)||[])[0]) || 0) + 1 : 1;
         }
 
         // 用户指定需求点编号处理

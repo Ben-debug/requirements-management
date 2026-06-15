@@ -48,25 +48,23 @@ function ensureUploadDirs() {
 }
 ensureUploadDirs();
 
-// Rename helper: rename uploaded file with proper name under correct dir
-function renameUploadedFile(oldPath, targetDir, newName) {
-  const ext = path.extname(oldPath);
-  const safeName = newName.replace(/[<>:"/\\|?*]/g, '_');
-  const newPath = path.join(targetDir, Date.now()+'-'+safeName+ext);
-  try {
-    fs.renameSync(oldPath, newPath);
-    return newPath;
-  } catch(e) { return oldPath; }
-}
-
-const uploadTemp = multer({ dest: getUploadBaseDir() });
+const uploadTemp = multer({
+  dest: getUploadBaseDir(),
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.xlsx','.xls','.doc','.docx','.ppt','.pptx','.pdf','.txt','.png','.jpg','.jpeg','.gif','.zip','.rar'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) return cb(null, true);
+    cb(new Error('不支持的文件类型: ' + ext + '（允许: ' + allowed.join(', ') + '）'));
+  },
+  limits: { fileSize: 30 * 1024 * 1024 }
+});
 
 // ---- Auto create upgrade log on restart ----
 try {
   const db = getDatabase();
   const lastLog = db.prepare('SELECT version FROM upgrade_logs ORDER BY id DESC LIMIT 1').get();
   const ver = lastLog ? bumpVersion(lastLog.version) : 'v1.0.0';
-  db.prepare("INSERT INTO upgrade_logs (version,title,content) VALUES (?,?,?)").run(ver, `系统升级 ${ver}`, '系统自动记录启动更新');
+  db.prepare("INSERT INTO upgrade_logs (version,title,content) VALUES (?,?,?)").run(ver, `系统重新启动 ${ver}`, '服务重启自动记录');
 } catch(e) {}
 
 function bumpVersion(v) {
@@ -208,49 +206,24 @@ app.post('/api/orders/:orderId/points', (req, res) => {
     const db = getDatabase(); const { description, sub_batch } = req.body;
     const order = db.prepare('SELECT order_number FROM requirement_orders WHERE id=?').get(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-    if (sub_batch !== undefined && sub_batch !== null && sub_batch !== '') {
-      // 有批次号 → 子单模式：编号 A01-1-1
-      if (!/^\d+$/.test(sub_batch)) return res.status(400).json({ success: false, message: '批次号应为纯数字' });
-      const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch=? ORDER BY id DESC LIMIT 1").get(req.params.orderId, sub_batch);
-      let seq = 1;
-      if (max) { const parts = max.point_number.split('-'); seq = parseInt(parts[2]) + 1; }
-      const pointNumber = `${order.order_number}-${sub_batch}-${String(seq).padStart(3,'0')}`;
-      const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch);
-      res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
-    } else {
-      // 无批次号 → 传统模式：编号 A01-1
-      const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? AND sub_batch IS NULL AND point_number NOT LIKE '%-%-%' ORDER BY id DESC LIMIT 1").get(req.params.orderId);
-      let seq = 1;
-      if (max) {
-        const m = max.point_number.match(/(\d{3})$/);
-        seq = m ? parseInt(m[1]) + 1 : 1;
-      }
-      const pointNumber = `${order.order_number}${String(seq).padStart(3,'0')}`;
-      const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(req.params.orderId, pointNumber, description);
-      res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
+    // 自动生成编号: 需求单编号-3位顺序号 (如 A01-001)
+    const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1").get(req.params.orderId);
+    let seq = 1;
+    if (max) {
+      const m = max.point_number.match(/(\d{3})$/);
+      seq = m ? parseInt(m[1]) + 1 : 1;
     }
+    const pointNumber = `${order.order_number}-${String(seq).padStart(3,'0')}`;
+    const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch || null);
+    res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.put('/api/points/:id', (req, res) => {
-  try { const db = getDatabase(); const { description } = req.body; db.prepare("UPDATE requirement_points SET description=?,updated_at=datetime('now','localtime') WHERE id=?").run(description, req.params.id); res.json({ success: true }); }
+  try { const db = getDatabase(); const { description, sub_batch } = req.body; db.prepare("UPDATE requirement_points SET description=?, sub_batch=?, updated_at=datetime('now','localtime') WHERE id=?").run(description, sub_batch||null, req.params.id); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 修改需求点编号
-app.put('/api/points/:id/number', (req, res) => {
-  try {
-    const db = getDatabase(); const { point_number } = req.body;
-    if (!point_number || !/^[A-Z]\d{2}(-\d{1,3}(-\d{1,3})?|\d{3})$/.test(point_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需如 A01001 或 A01-1-001）' });
-    const dup = db.prepare('SELECT id FROM requirement_points WHERE point_number=? AND id!=?').get(point_number, req.params.id);
-    if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求点使用' });
-    const point = db.prepare('SELECT id, order_id FROM requirement_points WHERE id=?').get(req.params.id);
-    if (!point) return res.status(404).json({ success: false, message: '需求点不存在' });
-    // 同步更新 ccb_schedules 中的引用显示（如果已排期）
-    db.prepare("UPDATE requirement_points SET point_number=?, updated_at=datetime('now','localtime') WHERE id=?").run(point_number, req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
 
 app.delete('/api/points/:id', (req, res) => {
   try { const db = getDatabase(); db.prepare('DELETE FROM requirement_points WHERE id=?').run(req.params.id); res.json({ success: true }); }
@@ -306,6 +279,38 @@ app.get('/api/files/:id/download', (req, res) => {
 app.delete('/api/files/:id', (req, res) => {
   try { const db = getDatabase(); const f = db.prepare('SELECT * FROM flow_files WHERE id=?').get(req.params.id); if (f && fs.existsSync(f.file_path)) fs.unlinkSync(f.file_path); db.prepare('DELETE FROM flow_files WHERE id=?').run(req.params.id); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 文件列表（跨需求单，分页+筛选）
+app.get('/api/files', (req, res) => {
+  try {
+    const db = getDatabase();
+    const { page=1, pageSize=20, keyword, file_type, department, date_from, date_to } = req.query;
+    let sql = `SELECT f.*, ro.order_number, ro.name AS order_name, ro.department
+      FROM flow_files f LEFT JOIN requirement_orders ro ON f.order_id=ro.id
+      WHERE 1=1`;
+    const params = [];
+    if (keyword) { const k = `%${keyword}%`; sql += ' AND (ro.order_number LIKE ? OR ro.name LIKE ? OR f.original_name LIKE ?)'; params.push(k, k, k); }
+    if (file_type) { sql += ' AND f.file_type=?'; params.push(file_type); }
+    if (department) { sql += ' AND ro.department=?'; params.push(department); }
+    if (date_from) { sql += ' AND f.uploaded_at >= ?'; params.push(date_from); }
+    if (date_to) { sql += ' AND f.uploaded_at <= ?'; params.push(date_to); }
+    sql += ' ORDER BY f.uploaded_at DESC';
+    const result = paginate(sql, params, parseInt(page), parseInt(pageSize));
+    // 返回部门列表给前端筛选下拉
+    const departments = db.prepare('SELECT DISTINCT department FROM requirement_orders WHERE department IS NOT NULL ORDER BY department').all().map(r => r.department);
+    res.json({ success: true, ...result, filters: { departments } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 会议纪要文件下载
+app.get('/api/meetings/:id/file/download', (req, res) => {
+  try {
+    const db = getDatabase(); const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id);
+    if (!m || !m.file_path) return res.status(404).json({ success: false, message: '文件不存在' });
+    if (!fs.existsSync(m.file_path)) return res.status(404).json({ success: false, message: '文件已不存在' });
+    res.download(m.file_path, m.file_name);
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // ---- CCB ----
@@ -517,7 +522,7 @@ function exportOrdersToExcel(orders, res) {
   for (const o of orders) {
     const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(o.id);
     if (points.length === 0) {
-      rows.push({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','关联部门':o.related_departments||'','提出人':o.proposer||'','提出日期':o.propose_date||'','提出背景':o.background||'','提出背景':o.background||'', '业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''});
+      rows.push({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','关联部门':o.related_departments||'','提出人':o.proposer||'','提出日期':o.propose_date||'','提出背景':o.background||'', '业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''});
     } else {
       for (const p of points) {
         const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
@@ -704,8 +709,10 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
 app.get('/api/config/browse', (req, res) => {
   try {
     const dirPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
-    // 安全检查：禁止浏览 node_modules
-    if (dirPath.includes('node_modules')) return res.json({ success: true, data: { current: dirPath, parent: null, subdirs: [] } });
+    // 安全检查：禁止浏览 node_modules 等敏感目录
+    const resolvedPath = path.resolve(dirPath);
+    if (resolvedPath.includes('node_modules')) return res.json({ success: true, data: { current: dirPath, parent: null, subdirs: [] } });
+    dirPath = resolvedPath;
     if (!fs.existsSync(dirPath)) return res.status(400).json({ success: false, message: '路径不存在' });
     const stat = fs.statSync(dirPath);
     if (!stat.isDirectory()) return res.status(400).json({ success: false, message: '不是目录' });
@@ -776,6 +783,14 @@ app.delete('/api/config/:category/:label', (req, res) => {
 app.get('/api/upgrade-logs', (req, res) => {
   try { const db = getDatabase(); res.json({ success: true, data: db.prepare('SELECT * FROM upgrade_logs ORDER BY created_at DESC').all() }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ---- 全局错误处理（multer 文件类型错误等） ----
+app.use((err, req, res, next) => {
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ success: false, message: '文件大小不能超过 30MB' });
+  if (err.message && err.message.startsWith('不支持的文件类型')) return res.status(400).json({ success: false, message: err.message });
+  console.error('Unhandled error:', err);
+  res.status(500).json({ success: false, message: err.message || '服务器内部错误' });
 });
 
 // ---- 兜底：所有未匹配 API 的路由返回 index.html（支持前端路由） ----

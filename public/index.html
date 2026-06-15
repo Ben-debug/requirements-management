@@ -15,7 +15,7 @@
   <div class="nav-items">
     <div class="nav-item active" data-page="orders" onclick="navigate('orders')">📄 需求单管理</div>
     <div class="nav-item" data-page="meetings" onclick="navigate('meetings')">📅 CCB排期管理</div>
-    <div class="nav-item" data-page="schedules" onclick="navigate('schedules')">🔍 排期信息筛选</div>
+    <div class="nav-item" data-page="files" onclick="navigate('files')">📎 流转文件</div>
     <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
   </div>
   <div class="nav-search" id="nav-search-container">
@@ -77,7 +77,7 @@
   <div class="table-container">
     <table id="orders-table"><thead><tr>
       <th>需求单编号</th><th>名称</th><th>提出部门</th><th>关联部门</th><th>提出人</th><th>提出日期</th><th>上线预期</th><th>排期一览</th><th>操作</th>
-    </tr></thead><tbody><tr><td colspan="8"><div class="loading">加载中...</div></td></tr></tbody></table>
+    </tr></thead><tbody><tr><td colspan="9"><div class="loading">加载中...</div></td></tr></tbody></table>
     <div id="orders-pagination" class="pagination"></div>
   </div>
 </div>
@@ -85,32 +85,72 @@
 <!-- Meetings Page -->
 <div id="page-meetings" class="page-content" style="display:none">
   <div class="page-header"><h2>📅 CCB排期管理</h2><p>管理CCB会议记录，为需求点进行排期</p></div>
-  <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个CCB会议记录，填写会议名称和日期，后续在会议中进行需求点排期">＋ 新建CCB会议</button></div>
-  <div id="meetings-list"></div>
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <div class="tab-item active" data-tab="meeting-mgmt" onclick="switchMeetingTab('meeting-mgmt')">📋 会议管理</div>
+    <div class="tab-item" data-tab="schedule-query" onclick="switchMeetingTab('schedule-query')">🔍 排期查询</div>
+  </div>
+  <!-- Tab: 会议管理 -->
+  <div id="tab-meeting-mgmt" class="tab-content" style="display:block">
+    <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个CCB会议记录，填写会议名称和日期，后续在会议中进行需求点排期">＋ 新建CCB会议</button></div>
+    <div id="meetings-list"></div>
+  </div>
+  <!-- Tab: 排期查询 -->
+  <div id="tab-schedule-query" class="tab-content" style="display:none">
+    <div class="toolbar">
+      <div class="filter-row">
+        <select id="filter-version"><option value="">全部版本</option></select>
+        <select id="filter-schedule-department"><option value="">全部部门</option></select>
+        <select id="filter-meeting"><option value="">全部会议</option></select>
+        <select id="filter-system"><option value="">全部系统</option></select>
+        <button class="btn btn-primary" onclick="applyFilter()" title="按版本、部门、会议、系统等条件筛选排期信息">🔍 查询</button>
+        <button class="btn btn-sm" onclick="resetFilter()">↻ 重置</button>
+        <select id="filter-group" style="margin-left:auto">
+          <option value="version" selected>按版本分组</option>
+          <option value="">不分组</option>
+          <option value="department">按部门分组</option>
+          <option value="meeting">按会议分组</option>
+          <option value="system">按系统分组</option>
+        </select>
+      </div>
+    </div>
+    <div id="schedule-results"></div>
+    <div id="schedules-pagination" class="pagination"></div>
+  </div>
 </div>
 
-<!-- Schedules Page -->
-<div id="page-schedules" class="page-content" style="display:none">
-  <div class="page-header"><h2>🔍 排期信息筛选</h2><p>灵活查询排期信息，支持分组显示</p></div>
-  <div class="toolbar">
-    <div class="filter-row">
-      <select id="filter-version"><option value="">全部版本</option></select>
-      <select id="filter-department"><option value="">全部部门</option></select>
-      <select id="filter-meeting"><option value="">全部会议</option></select>
-      <select id="filter-system"><option value="">全部系统</option></select>
-      <button class="btn btn-primary" onclick="applyFilter()" title="按版本、部门、会议、系统等条件筛选排期信息">🔍 查询</button>
-      <button class="btn btn-sm" onclick="resetFilter()">↻ 重置</button>
-      <select id="filter-group" style="margin-left:auto">
-        <option value="version" selected>按版本分组</option>
-        <option value="">不分组</option>
-        <option value="department">按部门分组</option>
-        <option value="meeting">按会议分组</option>
-        <option value="system">按系统分组</option>
-      </select>
-    </div>
+
+
+<!-- Files Page -->
+<div id="page-files" class="page-content" style="display:none">
+  <div class="page-header">
+    <h2>📎 流转文件管理</h2>
+    <span id="file-result-info" style="font-size:13px;color:#999;margin-left:12px"></span>
+    <p>跨需求单统一管理流转文件，支持下载和筛选</p>
   </div>
-  <div id="schedule-results"></div>
-  <div id="schedules-pagination" class="pagination"></div>
+  <div class="filter-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:8px 12px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)">
+    <input type="text" id="file-filter-keyword" placeholder="🔍 订单编号/名称/文件名" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:180px">
+    <select id="file-filter-type" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
+      <option value="">全部类型</option>
+    </select>
+    <select id="file-filter-department" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
+      <option value="">提出部门</option>
+    </select>
+    <input type="date" id="file-filter-date-from" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
+    <span style="color:#999;font-size:12px">~</span>
+    <input type="date" id="file-filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
+    <button class="btn btn-sm btn-primary" onclick="applyFileFilter()">🔍 查询</button>
+    <button class="btn btn-sm" onclick="resetFileFilter()">↻ 重置</button>
+  </div>
+  <div class="table-container">
+    <table id="files-table">
+      <thead><tr>
+        <th style="width:40%">文件名</th><th>类型</th><th>所属需求单</th><th>提出部门</th><th>子单</th><th>上传日期</th><th>操作</th>
+      </tr></thead>
+      <tbody><tr><td colspan="7"><div class="loading">加载中...</div></td></tr></tbody>
+    </table>
+    <div id="files-pagination" class="pagination"></div>
+  </div>
 </div>
 
 <!-- Config Page -->
@@ -182,11 +222,7 @@
   </div>
 </div>
 
-<!-- Upgrade Logs Page -->
-<div id="page-upgradelogs" class="page-content" style="display:none">
-  <div class="page-header"><h2>📋 系统升级日志</h2><p>系统更新与版本发布记录，每次重启自动生成</p></div>
-  <div id="upgrade-logs-list"></div>
-</div>
+<!-- Upgrade Logs: removed -->
 </main>
 
 <!-- Order Modal -->
@@ -199,7 +235,7 @@
     <div class="form-group"><label>关联部门（可多选，非必填）</label><div id="related-departments" style="display:flex;flex-wrap:wrap;gap:8px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:36px"></div></div></div>
     <div class="form-row"><div class="form-group"><label>提出人 <span class="required">*</span></label><input type="text" id="proposer" name="proposer" class="form-control" required></div>
     <div class="form-group"><label>提出日期 <span class="required">*</span></label><input type="date" id="propose_date" name="propose_date" class="form-control" required></div></div>
-    <div class="form-group"><label>提出背景 <span class="required">*</span></label><textarea id="background" name="background" class="form-control" placeholder="说明提出该需求的原因、背景和期望达到的业务目标（选填）"></textarea></div>
+    <div class="form-group"><label>提出背景 </label><textarea id="background" name="background" class="form-control" placeholder="说明提出该需求的原因、背景和期望达到的业务目标（选填）"></textarea></div>
     <div class="form-row"><div class="form-group"><label>上线预期 <span class="required">*</span></label><input type="text" id="business_launch_date" name="business_launch_date" class="form-control" placeholder="日期或文字" required></div>
     <div class="form-group"></div></div>
   </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('order-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
@@ -223,11 +259,16 @@
     <div class="detail-section"><h4>提出背景</h4>
       <div style="padding:12px 16px;background:#fffbe6;border-radius:6px;border-left:4px solid #faad14;font-size:14px;line-height:1.8;white-space:pre-wrap;word-break:break-all" id="detail-background">—</div>
     </div>
-    <div class="detail-section"><h4>需求点详情</h4>
-      <button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
+    <!-- Detail tabs -->
+    <div class="detail-tab-bar">
+      <div class="detail-tab-item active" data-dtab="points" onclick="switchDetailTab('points')">📋 需求点详情</div>
+      <div class="detail-tab-item" data-dtab="files" onclick="switchDetailTab('files')">📎 流转文件</div>
+    </div>
+    <div id="dtab-points" class="detail-tab-content" style="display:block">
+      <div style="margin-bottom:12px"><button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button></div>
       <div id="detail-points" class="points-list"></div>
     </div>
-    <div class="detail-section"><h4>流转文件</h4>
+    <div id="dtab-files" class="detail-tab-content" style="display:none">
       <div class="form-row" style="margin-bottom:12px">
         <div class="form-group"><select id="file-type" class="form-control"></select></div>
         <div class="form-group"><select id="file-batch" class="form-control" style="min-width:120px"><option value="">所属子单（选填）</option></select></div>
@@ -244,24 +285,14 @@
 <div id="point-modal" class="modal-overlay"><div class="modal">
   <div class="modal-header"><h3 id="point-modal-title">添加需求点</h3><button class="modal-close" onclick="closeModal('point-modal')">×</button></div>
   <form id="point-form"><div class="modal-body">
-    <div class="form-group" id="point-number-group" style="display:none">
-      <label>需求点编号</label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="text" id="point-number-input" class="form-control" placeholder="自动生成" style="max-width:200px">
-        <button type="button" class="btn btn-sm" id="btn-save-point-number" onclick="savePointNumber()" style="display:none">保存编号</button>
-        <span id="point-number-status" style="font-size:12px;color:#999"></span>
-      </div>
-      <div class="form-hint">留空自动生成，格式如 A01-1（无批次）或 A01-1-1（有批次）</div>
-    </div>
     <div class="form-group" id="point-batch-group">
       <label>子单批次号
-        <span style="font-weight:400;font-size:12px;color:#999">（仅拆分子单时填写，如 1/2/3 → 将显示为 A01-1）</span>
+        <span style="font-weight:400;font-size:12px;color:#999">（用于分组展示，不参与编号）</span>
       </label>
       <div style="display:flex;gap:8px;align-items:center">
-        <input type="text" id="point-sub-batch" class="form-control" placeholder="留空 = 不拆单" style="max-width:120px">
+        <input type="text" id="point-sub-batch" class="form-control" placeholder="留空 = 无子单" style="max-width:120px">
         <span id="point-batch-preview" style="font-size:13px;color:#999"></span>
       </div>
-      <div class="form-hint">填写数字后，需求点编号自动变为 A01-{批次}-{序号}</div>
     </div>
     <div class="form-group"><label>描述 <span class="required">*</span></label><textarea id="point-description" name="description" class="form-control" required></textarea></div>
   </div>
@@ -361,11 +392,11 @@
 
 <footer class="app-footer">
   <div class="footer-content">
-    <span>需求单信息管理系统 v1.1.0</span>
-    <span>创作者：余新泰</span>
+    <span>需求单信息管理系统 v1.3.0</span>
+    <span>创作者：Yu by AI</span>
     <span>发布日期：2026-06-12</span>
   </div>
 </footer>
-<script src="/js/app.js"></script>
+<script src="/js/app.js?v=1.3.3"></script>
 </body>
 </html>

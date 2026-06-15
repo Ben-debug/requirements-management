@@ -24,9 +24,27 @@ function navigate(page) {
   document.querySelectorAll('.page-content').forEach(e => e.style.display = 'none');
   document.getElementById(`page-${page}`).style.display = 'block';
   if (page === 'orders') { state.orderPage = 1; loadOrders(); }
-  else if (page === 'meetings') loadMeetings();
-  else if (page === 'schedules') { state.schedulePage = 1; loadScheduleFilter(); }
+  else if (page === 'meetings') { loadMeetings(); switchMeetingTab('meeting-mgmt'); }
+  else if (page === 'files') loadFiles();
   else if (page === 'config') loadConfig();
+}
+
+function switchMeetingTab(tab) {
+  document.querySelectorAll('#page-meetings .tab-item').forEach(t => t.classList.remove('active'));
+  document.querySelector(`#page-meetings .tab-item[data-tab="${tab}"]`).classList.add('active');
+  document.querySelectorAll('#page-meetings .tab-content').forEach(t => t.style.display = 'none');
+  document.getElementById('tab-' + tab).style.display = 'block';
+  if (tab === 'schedule-query') {
+    state.schedulePage = 1;
+    loadScheduleFilter();
+  }
+}
+
+function switchDetailTab(tab) {
+  document.querySelectorAll('#detail-modal .detail-tab-item').forEach(t => t.classList.remove('active'));
+  document.querySelector('#detail-modal .detail-tab-item[data-dtab="' + tab + '"]').classList.add('active');
+  document.querySelectorAll('#detail-modal .detail-tab-content').forEach(t => t.style.display = 'none');
+  document.getElementById('dtab-' + tab).style.display = 'block';
 }
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -44,7 +62,7 @@ async function loadDropdowns() {
     fillSelect('detail-schedule-version', vers.data, '请选择版本');
     fillSelect('edit-schedule-version', vers.data, '请选择版本');
     fillSelect('file-type', ftypes.data, '选择文件类型');
-  } catch(e) { console.error("loadOrders error:", e); }
+  } catch(e) { console.error("loadDropdowns error:", e); }
 }
 
 function fillSelect(id, items, placeholder) {
@@ -130,7 +148,7 @@ async function loadPaths() {
     document.getElementById('path-data-dir').placeholder = p.defaults?.data_dir || 'data/';
     document.getElementById('path-flow-files').placeholder = p.defaults?.flow_files_dir || 'public/uploads/flow_files/';
     document.getElementById('path-meeting-files').placeholder = p.defaults?.meeting_files_dir || 'public/uploads/meeting_files/';
-  } catch(e) { console.error("loadOrders error:", e); }
+  } catch(e) { console.error("loadPaths error:", e); }
   document.getElementById('path-save-status').textContent = '';
 }
 
@@ -187,7 +205,6 @@ function getFilterParams() {
 }
 
 async function loadOrders() {
-  console.log("loadOrders() called");
   try {
     const params = getFilterParams();
     const qs = Object.entries(params).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
@@ -198,7 +215,6 @@ async function loadOrders() {
     if (!r.items.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>'; renderPagination('orders-pagination', r); return; }
     
     function orderRow(o) {
-  console.log("orderRow called for", o.id, o.order_number);
       const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
       // 计算排期状态
       var schedCount = (o.schedule_summary||{}).scheduled || 0, totalPoints = (o.schedule_summary||{}).total || 0;
@@ -213,13 +229,13 @@ async function loadOrders() {
         schedHtml = '<span style="font-size:12px;color:#ff4d4f;font-weight:500">⏳ 0/' + totalPoints + '</span>';
       }
       return `<tr>
-      <td><a href="javascript:void(0)" onclick="viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
+      <td><a href="javascript:void(0)" onclick="window.viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
       <td>${esc(o.name)}</td><td>${esc(o.department||'-')}</td>
       <td>${rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-'}</td>
       <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
       <td style="text-align:center">${schedHtml}</td>
-      <td><div class="action-group"><button class="btn btn-sm" onclick="viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteOrder(${o.id})">删除</button></div></td>
+      <td><div class="action-group"><button class="btn btn-sm" onclick="window.viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="window.editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="window.deleteOrder(${o.id})">删除</button></div></td>
     </tr>`;
     }
     
@@ -243,7 +259,14 @@ async function loadOrders() {
       }
     }
   } catch(e) { console.error("loadOrders error:", e); }
+}
 
+async function applyFilters() {
+  state.orderPage = 1; loadOrders();
+}
+function onFilterChange() {
+  state.orderPage = 1; loadOrders();
+}
 function resetFilters() {
   document.getElementById('filter-department').value = '';
   document.getElementById('filter-date-from').value = '';
@@ -275,23 +298,12 @@ function renderPagination(containerId, r) {
     </div>
   </div>`;
 }
-  state.orderPage = 1; loadOrders();
-}
 
 // 按回车触发查询
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('filter-keyword')?.addEventListener('keydown', e => { if (e.key === 'Enter') applyFilters(); });
 });
 
-function renderPagination(containerId, r) {
-  const c = document.getElementById(containerId); if (!c) return;
-  if (!r || r.totalPages <= 1) { c.innerHTML = ''; return; }
-  c.innerHTML = `<button class="page-btn" onclick="gotoOrderPage(1)" ${r.page<=1?'disabled':''}>«</button>
-    <button class="page-btn" onclick="gotoOrderPage(${r.page-1})" ${r.page<=1?'disabled':''}>‹</button>
-    <span class="page-info">第 ${r.page}/${r.totalPages} 页 (共${r.total}条)</span>
-    <button class="page-btn" onclick="gotoOrderPage(${r.page+1})" ${r.page>=r.totalPages?'disabled':''}>›</button>
-    <button class="page-btn" onclick="gotoOrderPage(${r.totalPages})" ${r.page>=r.totalPages?'disabled':''}>»</button>`;
-}
 function gotoOrderPage(p) { state.orderPage = p; loadOrders(); }
 function gotoSchedulePage(p) { state.schedulePage = p; applyFilter(); }
 
@@ -365,7 +377,7 @@ function updatePointBatchPreview() {
   const preview = document.getElementById('point-batch-preview');
   if (!preview) return;
   if (batch && orderNum) {
-    preview.textContent = `→ ${orderNum}-${batch}-N（N自动递增）`;
+    preview.textContent = `→ 子单 ${batch}（仅分组，编号格式为 ${orderNum}-001）`;
   } else {
     preview.textContent = '';
   }
@@ -553,21 +565,31 @@ function onDeptChange() {
 }
 
 async function viewOrder(id) {
-  const o = (await api(`/api/orders/${id}`)).data; state.currentOrder = o;
-  for (const k of ['detail-number','detail-number-display']) document.getElementById(k).textContent = o.order_number;
-  document.getElementById('detail-name').textContent = o.name; document.getElementById('detail-department').textContent = o.department||'-';
-  document.getElementById('detail-proposer').textContent = o.proposer||'-'; document.getElementById('detail-propose-date').textContent = o.propose_date||'-';
-  document.getElementById('detail-background').textContent = o.background||'-'; document.getElementById('detail-launch-date').textContent = o.business_launch_date||'-'; document.getElementById('detail-order-id').value = o.id;
-  // Show related departments
-  const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
-  document.getElementById('detail-related-depts').innerHTML = rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-';
-  // 填充文件上传的子单批次下拉
-  const batchSel = document.getElementById('file-batch');
-  if (batchSel) {
-    const batches = [...new Set((o.points||[]).map(p => p.sub_batch).filter(b => b))].sort();
-    batchSel.innerHTML = '<option value="">\u6240\u5C5E\u5B50\u5355\uFF08\u9009\u586B\uFF09</option>' + batches.map(b => '<option value="'+b+'">'+o.order_number+'-'+b+'</option>').join('');
+  try {
+    const r = await fetch('/api/orders/' + id);
+    const d = await r.json();
+    if (!d.success) { return; }
+    const o = d.data;
+    state.currentOrder = o;
+    
+    for (const k of ['detail-number','detail-number-display']) document.getElementById(k).textContent = o.order_number;
+    document.getElementById('detail-name').textContent = o.name; document.getElementById('detail-department').textContent = o.department||'-';
+    document.getElementById('detail-proposer').textContent = o.proposer||'-'; document.getElementById('detail-propose-date').textContent = o.propose_date||'-';
+    document.getElementById('detail-background').textContent = o.background||'-'; document.getElementById('detail-launch-date').textContent = o.business_launch_date||'-'; document.getElementById('detail-order-id').value = o.id;
+    
+    const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
+    document.getElementById('detail-related-depts').innerHTML = rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-';
+    
+    const batchSel = document.getElementById('file-batch');
+    if (batchSel) {
+      const batches = [...new Set((o.points||[]).map(p => p.sub_batch).filter(b => b))].sort();
+      batchSel.innerHTML = '<option value="">\u6240\u5C5E\u5B50\u5355\uFF08\u9009\u586B\uFF09</option>' + batches.map(b => '<option value="'+b+'">'+o.order_number+'-'+b+'</option>').join('');
+    }
+    
+    await loadDropdowns(); renderDetailPoints(o.points||[]); renderFiles(o.files||[]); openModal('detail-modal');
+  } catch(e) {
+    console.error(e);
   }
-  await loadDropdowns(); renderDetailPoints(o.points||[]); renderFiles(o.files||[]); openModal('detail-modal');
 }
 
 function renderDetailPoints(points) {
@@ -575,7 +597,7 @@ function renderDetailPoints(points) {
   if (!points.length) { c.innerHTML = '<div class="empty-state"><p>暂无需求点</p></div>'; return; }
   const oid = document.getElementById('detail-order-id').value;
   const orderNum = document.getElementById('detail-number-display')?.textContent || '';
-  
+
   // 按 sub_batch 分组
   const batched = {}, unbatched = [];
   points.forEach(p => {
@@ -586,59 +608,103 @@ function renderDetailPoints(points) {
       unbatched.push(p);
     }
   });
-  
+
+  const totalScheduled = points.filter(p => p.schedule_system || p.schedule_id).length;
+  const totalCount = points.length;
+  const batchCount = Object.keys(batched).length;
+  const pct = totalCount ? Math.round(totalScheduled / totalCount * 100) : 0;
+
   let html = '';
+
+  // === 顶部汇总条 ===
+  html += `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#fafafa;border-radius:8px;margin-bottom:16px;border:1px solid #e8e8e8">
+    <span style="font-weight:600;font-size:14px;color:#333">📊 汇总</span>
+    <span style="font-size:13px;color:#666">共 <b>${totalCount}</b> 项</span>
+    ${batchCount ? `<span style="font-size:13px;color:#666">${batchCount} 个子单</span>` : ''}
+    <span style="font-size:13px;color:#52c41a">✅ 已排期 <b>${totalScheduled}</b></span>
+    <span style="font-size:13px;color:#ff4d4f">⏳ 待排期 <b>${totalCount - totalScheduled}</b></span>
+    <div style="flex:1;min-width:120px;height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#52c41a,#73d13d);border-radius:4px;transition:width .3s"></div>
+    </div>
+    <span style="font-size:12px;color:#999;min-width:40px;text-align:right">${pct}%</span>
+  </div>`;
+
   const batchKeys = Object.keys(batched).sort((a,b) => parseInt(a)-parseInt(b));
-  
-  // 有批次的分组显示
+
+  // === 有批次的子单分组 ===
   batchKeys.forEach(batch => {
     const pts = batched[batch];
-    const allScheduled = pts.every(p => p.schedule_system || p.schedule_id);
-    const anyScheduled = pts.some(p => p.schedule_system || p.schedule_id);
+    const scheduled = pts.filter(p => p.schedule_system || p.schedule_id).length;
+    const allScheduled = scheduled === pts.length;
+    const anyScheduled = scheduled > 0;
     const batchLabel = orderNum + '-' + batch;
-    html += `<div class="batch-header">
+    const batchPct = Math.round(scheduled / pts.length * 100);
+
+    html += `<div class="batch-card" style="border:1px solid #e8e8e8;border-radius:8px;margin-bottom:12px;overflow:hidden">`;
+    // 批次头部
+    html += `<div class="batch-header" style="margin:0;border-left:4px solid ${allScheduled?'#52c41a':(anyScheduled?'#fa8c16':'#d9d9d9')};border-radius:0;cursor:pointer" onclick="this.nextElementSibling.classList.toggle('batch-collapsed')">
       <div class="batch-header-left">
-        <span class="batch-title">${batchLabel}</span>
+        <span style="font-size:13px;color:#999;cursor:pointer" title="点击折叠/展开">▼</span>
+        <span class="batch-title" style="font-size:15px">📁 ${batchLabel}</span>
         <span class="batch-count">${pts.length}项</span>
-        ${allScheduled ? '<span class="badge badge-green">已全部排期</span>' : (anyScheduled ? '<span class="badge badge-orange">部分排期</span>' : '')}
+        ${allScheduled ? '<span class="badge badge-green">✅ 全部排期</span>' : (anyScheduled ? '<span class="badge badge-orange">⏳ 部分排期</span>' : '<span class="badge" style="background:#f5f5f5;color:#999;border:1px solid #d9d9d9">⏳ 待排期</span>')}
       </div>
-      <div class="batch-header-right">
-        ${!allScheduled ? `<button class="btn btn-sm btn-success" onclick="batchScheduleSubOrder(${oid},'${batch}')">📋 整批排期</button>` : ''}
+      <div class="batch-header-right" style="display:flex;align-items:center;gap:10px">
+        <div style="width:80px;height:6px;background:#f0f0f0;border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${batchPct}%;background:${allScheduled?'#52c41a':'#fa8c16'};border-radius:3px"></div>
+        </div>
+        <span style="font-size:11px;color:#999">${batchPct}%</span>
+        ${!allScheduled ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();batchScheduleSubOrder(${oid},'${batch}')">📋 整批排期</button>` : ''}
+        <span style="font-size:11px;color:#ccc">▼</span>
       </div>
     </div>`;
-    pts.forEach(p => {
-      html += renderPointItem(p, oid);
-    });
+    // 需求点列表
+    html += `<div class="batch-points">`;
+    pts.forEach(p => { html += renderPointItem(p, oid); });
+    html += `</div></div>`;
   });
-  
-  // 无批次的传统点
+
+  // === 无批次的传统点 ===
   if (unbatched.length) {
     if (batchKeys.length) {
-      html += `<div class="batch-header" style="margin-top:16px">
-        <div class="batch-header-left">
-          <span class="batch-title" style="font-size:13px;color:#999">📋 基础需求点（无批次）</span>
-          <span class="batch-count">${unbatched.length}项</span>
+      html += `<div class="batch-card" style="border:1px solid #e8e8e8;border-radius:8px;margin-bottom:12px;overflow:hidden;opacity:0.85">
+        <div class="batch-header" style="margin:0;border-left:4px solid #d9d9d9;border-radius:0;background:#fafafa;cursor:pointer" onclick="this.nextElementSibling.classList.toggle('batch-collapsed')">
+          <div class="batch-header-left">
+            <span style="font-size:13px;color:#999;cursor:pointer" title="点击折叠/展开">▼</span>
+            <span style="font-size:14px;color:#999">📋 基础需求点（无子单）</span>
+            <span style="font-size:12px;color:#999">${unbatched.length}项</span>
+          </div>
+          <div class="batch-header-right">
+            <span style="font-size:11px;color:#ccc">▼</span>
+          </div>
         </div>
-      </div>`;
+        <div class="batch-points">`;
     }
     unbatched.forEach(p => { html += renderPointItem(p, oid); });
+    if (batchKeys.length) { html += '</div></div>'; }
   }
-  
+
   c.innerHTML = html;
 }
 
 function renderPointItem(p, oid) {
   const has = p.schedule_system || p.schedule_id;
   const systems = p.schedule_system ? p.schedule_system.split(',').filter(Boolean) : [];
-  return `<div class="point-item"><div class="point-info"><div class="point-number">${esc(p.point_number)}</div><div class="point-desc">${esc(p.description)}</div>
-    <div class="point-meta">${has ? `<span style="color:#52c41a">✅ ${systems.map(s=>esc(s.trim())).join(', ')} | ${esc(p.schedule_version)}</span>` : '<span style="color:#fa8c16">⏳ 待排期</span>'}
-    ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}</div></div>
+  const tag = p.sub_batch ? `<span style="display:inline-block;font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px;margin-left:6px;font-weight:400">子单 ${p.sub_batch}</span>` : '';
+  return `<div class="point-item">
+    <div class="point-info">
+      <div class="point-number">${esc(p.point_number)}${tag}</div>
+      <div class="point-desc">${esc(p.description)}</div>
+      <div class="point-meta">${has ? `<span style="color:#52c41a">✅ ${systems.map(s=>esc(s.trim())).join(', ')} | ${esc(p.schedule_version)}</span>` : '<span style="color:#fa8c16">⏳ 待排期</span>'}
+      ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}</div>
+    </div>
     <div class="point-actions">
       <button class="btn btn-sm" onclick="editPoint(${p.id},${oid})">编辑</button>
       ${!has ? `<button class="btn btn-sm btn-success" onclick="showScheduleModal(${p.id},${oid})">排期</button>`
         : `<button class="btn btn-sm" onclick="openEditScheduleModal(${p.schedule_id},${oid})">修改排期</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromDetail(${p.schedule_id})">移除排期</button>`}
       <button class="btn btn-sm btn-danger" onclick="deletePoint(${p.id})">删除</button>
-    </div></div>`;
+    </div>
+  </div>`;
 }
 
 async function batchScheduleSubOrder(orderId, batch) {
@@ -797,19 +863,18 @@ function renderFiles(files) {
   c.innerHTML = html;
 }
 function fileItemHtml(f) {
-  return '<div class="file-item"><div class="file-info"><span class="file-type">' + esc(f.file_type) + '</span><span>' + esc(f.original_name) + '</span></div><div class="action-group"><button class="btn btn-sm btn-danger" onclick="deleteFile(' + f.id + ')">\u5220\u9664</button></div></div>';
+  return '<div class="file-item"><div class="file-info"><span class="file-type">' + esc(f.file_type) + '</span><span><a href="/api/files/' + f.id + '/download" style="color:#333;text-decoration:none" title="\u70b9\u51fb\u4e0b\u8f7d" target="_blank">' + esc(f.original_name) + '</a></span></div><div class="action-group"><a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="\u4e0b\u8f7d\u6587\u4ef6">\ud83d\udce5 \u4e0b\u8f7d</a><button class="btn btn-sm btn-danger" onclick="deleteFile(' + f.id + ')">\u5220\u9664</button></div></div>';
 }
 
 document.getElementById('point-form')?.addEventListener('submit', async e => {
   e.preventDefault(); const desc = document.getElementById('point-description').value;
   const subBatch = document.getElementById('point-sub-batch')?.value?.trim() || '';
-  try { if (state.editingPointId) { await api(`/api/points/${state.editingPointId}`,{method:'PUT',body:JSON.stringify({description:desc})}); showToast('已更新','success'); } else { const body = {description:desc}; if (subBatch) body.sub_batch = subBatch; await api(`/api/orders/${document.getElementById('detail-order-id').value}/points`,{method:'POST',body:JSON.stringify(body)}); showToast('已添加','success'); } closeModal('point-modal'); document.getElementById('point-form').reset(); state.editingPointId = null; viewOrder(document.getElementById('detail-order-id').value); } catch(e) {}
+  try { if (state.editingPointId) { await api(`/api/points/${state.editingPointId}`,{method:'PUT',body:JSON.stringify({description:desc, sub_batch:subBatch||null})}); showToast('已更新','success'); } else { const body = {description:desc}; if (subBatch) body.sub_batch = subBatch; await api(`/api/orders/${document.getElementById('detail-order-id').value}/points`,{method:'POST',body:JSON.stringify(body)}); showToast('已添加','success'); } closeModal('point-modal'); document.getElementById('point-form').reset(); state.editingPointId = null; viewOrder(document.getElementById('detail-order-id').value); } catch(e) {}
 });
 function showAddPoint() {
   state.editingPointId = null;
   document.getElementById('point-modal-title').textContent = '添加需求点';
   document.getElementById('point-description').value = '';
-  document.getElementById('point-number-group').style.display = 'none';
   document.getElementById('point-batch-group').style.display = 'block';
   document.getElementById('point-sub-batch').value = '';
   document.getElementById('point-batch-preview').textContent = '';
@@ -822,34 +887,10 @@ async function editPoint(id, oid) {
   if (!p) return;
   document.getElementById('point-modal-title').textContent = `编辑 - ${p.point_number}`;
   document.getElementById('point-description').value = p.description;
-  document.getElementById('point-number-group').style.display = 'block';
-  document.getElementById('point-number-input').value = p.point_number;
-  document.getElementById('point-number-status').textContent = '';
-  document.getElementById('btn-save-point-number').style.display = 'inline-flex';
-  document.getElementById('point-number-input').dataset.pointId = id;
-  // 编辑时不显示批次号输入（只有新建时可选）
-  document.getElementById('point-batch-group').style.display = 'none';
+  document.getElementById('point-batch-group').style.display = 'block';
+  document.getElementById('point-sub-batch').value = p.sub_batch || '';
+  updatePointBatchPreview();
   openModal('point-modal');
-}
-async function savePointNumber() {
-  const id = document.getElementById('point-number-input').dataset.pointId;
-  const val = document.getElementById('point-number-input').value.trim();
-  if (!val) { document.getElementById('point-number-status').textContent = '请输入编号'; return; }
-  try {
-    const r = await fetch(`/api/points/${id}/number`, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ point_number: val })
-    });
-    const d = await r.json();
-    if (!d.success) throw new Error(d.message);
-    document.getElementById('point-number-status').textContent = '✅ 已更新';
-    document.getElementById('point-number-input').value = val;
-    showToast('编号已更新', 'success');
-    // 刷新详情
-    const oid = document.getElementById('detail-order-id')?.value;
-    if (oid) viewOrder(parseInt(oid));
-  } catch(e) { showToast(e.message, 'error'); }
 }
 async function deletePoint(id) { if (!confirm('确定删除？')) return; try { await api(`/api/points/${id}`,{method:'DELETE'}); showToast('已删除','success'); viewOrder(document.getElementById('detail-order-id').value); } catch(e) {} }
 
@@ -865,7 +906,7 @@ async function deleteFile(id) { if (!confirm('确定删除？')) return; try { a
 
 // ---- Meetings ----
 async function loadMeetings() {
-  try { const meetings = (await api('/api/meetings')).data; const c = document.getElementById('meetings-list'); if (!meetings.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无CCB会议</p></div>'; return; } c.innerHTML = meetings.map(m => `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(m.meeting_name)}</div><div class="action-group"><button class="btn btn-sm" onclick="viewMeeting(${m.id})">排期管理</button><button class="btn btn-sm" onclick="editMeeting(${m.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteMeeting(${m.id})">删除</button></div></div><div class="sched-meta">日期: ${m.meeting_date}${m.notes?' | '+esc(m.notes):''}</div>${m.file_name?'<div class="sched-tags"><span class="sched-tag">📎 '+esc(m.file_name)+'</span></div>':''}</div>`).join(''); } catch(e) {}
+  try { const meetings = (await api('/api/meetings')).data; const c = document.getElementById('meetings-list'); if (!meetings.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无CCB会议</p></div>'; return; } c.innerHTML = meetings.map(m => `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(m.meeting_name)}</div><div class="action-group"><button class="btn btn-sm" onclick="viewMeeting(${m.id})">排期管理</button><button class="btn btn-sm" onclick="editMeeting(${m.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteMeeting(${m.id})">删除</button></div></div><div class="sched-meta">日期: ${m.meeting_date}${m.notes?' | '+esc(m.notes):''}</div>${m.file_name?'<div class="sched-tags"><span class="sched-tag">📎 <a href="/api/meetings/'+m.id+'/file/download" style="color:#333;text-decoration:none" target="_blank" title="下载纪要文件">'+esc(m.file_name)+'</a></span></div>':''}</div>`).join(''); } catch(e) {}
 }
 document.getElementById('meeting-form')?.addEventListener('submit', async e => { e.preventDefault(); const data = Object.fromEntries(new FormData(e.target)); try { if (state.editingMeetingId) { await api(`/api/meetings/${state.editingMeetingId}`,{method:'PUT',body:JSON.stringify(data)}); showToast('已更新','success'); } else { await api('/api/meetings',{method:'POST',body:JSON.stringify(data)}); showToast('已创建','success'); } closeModal('meeting-modal'); e.target.reset(); state.editingMeetingId = null; loadMeetings(); } catch(e) {} });
 function showCreateMeeting() { state.editingMeetingId = null; document.getElementById('meeting-modal-title').textContent = '新建CCB会议'; document.getElementById('meeting-form').reset(); openModal('meeting-modal'); }
@@ -1033,7 +1074,7 @@ async function loadScheduleFilter() {
   try {
     const r = await fetch(`/api/schedules/filter?group_by=version&page=${state.schedulePage}&pageSize=20`); const result = await r.json();
     if (!result.success) throw new Error(result.message);
-    fillFilter('filter-version', result.filters.versions, '全部版本'); fillFilter('filter-department', result.filters.departments, '全部部门'); fillFilter('filter-meeting', result.filters.meetings, '全部会议'); fillFilter('filter-system', result.filters.systems, '全部系统');
+    fillFilter('filter-version', result.filters.versions, '全部版本'); fillFilter('filter-schedule-department', result.filters.departments, '全部部门'); fillFilter('filter-meeting', result.filters.meetings, '全部会议'); fillFilter('filter-system', result.filters.systems, '全部系统');
     renderScheduleResults(result);
   } catch(e) { console.error(e); }
 }
@@ -1043,7 +1084,7 @@ function fillFilter(id, items, placeholder) {
 }
 
 async function applyFilter() {
-  const params = new URLSearchParams(); const v = document.getElementById('filter-version').value; if (v) params.set('version', v); const d = document.getElementById('filter-department').value; if (d) params.set('department', d); const m = document.getElementById('filter-meeting').value; if (m) params.set('meeting_name', m); const s = document.getElementById('filter-system').value; if (s) params.set('system', s); const g = document.getElementById('filter-group').value; if (g) params.set('group_by', g); params.set('page', state.schedulePage); params.set('pageSize', '20');
+  const params = new URLSearchParams(); const v = document.getElementById('filter-version').value; if (v) params.set('version', v); const d = document.getElementById('filter-schedule-department').value; if (d) params.set('department', d); const m = document.getElementById('filter-meeting').value; if (m) params.set('meeting_name', m); const s = document.getElementById('filter-system').value; if (s) params.set('system', s); const g = document.getElementById('filter-group').value; if (g) params.set('group_by', g); params.set('page', state.schedulePage); params.set('pageSize', '20');
   try { const r = await fetch(`/api/schedules/filter?${params}`); const result = await r.json(); if (!result.success) throw new Error(result.message); renderScheduleResults(result); } catch(e) { showToast(e.message,'error'); }
 }
 
@@ -1082,6 +1123,98 @@ function exportFiltered() {
   showToast('正在导出...','info');
 }
 
+// ---- 流转文件管理 ----
+var filePage = 1;
+function gotoFilePage(p) { filePage = p; loadFiles(); }
+
+async function loadFiles() {
+  try {
+    const params = new URLSearchParams();
+    const kw = document.getElementById('file-filter-keyword')?.value?.trim();
+    if (kw) params.set('keyword', kw);
+    const ft = document.getElementById('file-filter-type')?.value;
+    if (ft) params.set('file_type', ft);
+    const dept = document.getElementById('file-filter-department')?.value;
+    if (dept) params.set('department', dept);
+    const df = document.getElementById('file-filter-date-from')?.value;
+    if (df) params.set('date_from', df);
+    const dt = document.getElementById('file-filter-date-to')?.value;
+    if (dt) params.set('date_to', dt);
+    params.set('page', filePage);
+    params.set('pageSize', 20);
+
+    const r = await fetch('/api/files?' + params.toString());
+    const d = await r.json();
+    if (!d.success) { showToast(d.message, 'error'); return; }
+
+    // 填充类型下拉
+    const typeSel = document.getElementById('file-filter-type');
+    if (typeSel && typeSel.options.length <= 1) {
+      try { const ftRes = await api('/api/config/file_type');
+        (ftRes.data || []).forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; typeSel.appendChild(o); });
+      } catch(e) {}
+    }
+    // 填充部门下拉
+    const deptSel = document.getElementById('file-filter-department');
+    if (deptSel && deptSel.options.length <= 1 && d.filters?.departments) {
+      d.filters.departments.forEach(dep => { const o = document.createElement('option'); o.value = dep; o.textContent = dep; deptSel.appendChild(o); });
+    }
+
+    const tbody = document.querySelector('#files-table tbody');
+    const info = document.getElementById('file-result-info');
+    if (info) info.textContent = d.total ? '共 ' + d.total + ' 条' : '';
+
+    if (!d.items.length) {
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></td></tr>';
+      document.getElementById('files-pagination').innerHTML = '';
+      return;
+    }
+
+    tbody.innerHTML = d.items.map(function(f) {
+      return '<tr>' +
+        '<td><a href="/api/files/' + f.id + '/download" target="_blank" style="color:#333;text-decoration:none" title="点击下载">📄 ' + esc(f.original_name) + '</a></td>' +
+        '<td><span class="file-type">' + esc(f.file_type) + '</span></td>' +
+        '<td><a href="javascript:void(0)" onclick="navigate(\'orders\');setTimeout(function(){viewOrder(' + f.order_id + ')},100)" style="color:#1890ff;font-weight:500">' + esc(f.order_number) + '</a><br><span style="font-size:11px;color:#999">' + esc(f.order_name || '') + '</span></td>' +
+        '<td>' + esc(f.department || '-') + '</td>' +
+        '<td>' + (f.sub_batch ? '<span style="font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px">' + esc(f.sub_batch) + '</span>' : '-') + '</td>' +
+        '<td style="font-size:12px;color:#999">' + (f.uploaded_at || '-') + '</td>' +
+        '<td><a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="下载">📥</a> <button class="btn btn-sm btn-danger" onclick="deleteFileFromList(' + f.id + ')" title="删除">🗑</button></td>' +
+        '</tr>';
+    }).join('');
+
+    // 分页
+    var pc = document.getElementById('files-pagination'); pc.innerHTML = '';
+    if (d.totalPages > 1) {
+      pc.innerHTML =
+        '<button class="page-btn" onclick="gotoFilePage(1)" ' + (d.page<=1?'disabled':'') + '>«</button>' +
+        '<button class="page-btn" onclick="gotoFilePage(' + (d.page-1) + ')" ' + (d.page<=1?'disabled':'') + '>‹</button>' +
+        '<span class="page-info">第 ' + d.page + '/' + d.totalPages + ' 页 (共' + d.total + '条)</span>' +
+        '<button class="page-btn" onclick="gotoFilePage(' + (d.page+1) + ')" ' + (d.page>=d.totalPages?'disabled':'') + '>›</button>' +
+        '<button class="page-btn" onclick="gotoFilePage(' + d.totalPages + ')" ' + (d.page>=d.totalPages?'disabled':'') + '>»</button>';
+    }
+  } catch(e) { console.error(e); }
+}
+
+function applyFileFilter() { filePage = 1; loadFiles(); }
+function resetFileFilter() {
+  document.getElementById('file-filter-keyword').value = '';
+  document.getElementById('file-filter-type').value = '';
+  document.getElementById('file-filter-department').value = '';
+  document.getElementById('file-filter-date-from').value = '';
+  document.getElementById('file-filter-date-to').value = '';
+  filePage = 1; loadFiles();
+}
+async function deleteFileFromList(id) {
+  if (!confirm('确定删除该文件？')) return;
+  try { await api('/api/files/' + id, { method: 'DELETE' }); showToast('已删除', 'success'); loadFiles(); } catch(e) {}
+}
+
+// 回车触发文件筛选
+setTimeout(function() {
+  var fi = document.getElementById('file-filter-keyword');
+  if (fi) fi.addEventListener('keydown', function(e) { if (e.key === 'Enter') applyFileFilter(); });
+}, 0);
+
 function importExcel() { document.getElementById('import-file').click(); }
 function downloadTemplate() { window.open('/api/import/template','_blank'); }
 
@@ -1102,4 +1235,12 @@ document.getElementById('import-file')?.addEventListener('change', async e => {
   } catch(e) { showToast(e.message,'error'); }
 });
 
-document.addEventListener('DOMContentLoaded', () => { loadOrders(); loadDropdowns(); });
+// 强制绑定到 window（确保内联 onclick 能找到）
+window.viewOrder = viewOrder;
+window.editOrder = editOrder;
+window.deleteOrder = deleteOrder;
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadOrders(); loadDropdowns();
+});
+

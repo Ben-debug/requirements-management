@@ -146,11 +146,13 @@ app.get('/api/orders', (req, res) => {
     const scheduleSummary = (orderIds) => {
       if (!orderIds.length) return {};
       const placeholders = orderIds.map(() => '?').join(',');
-      const rows = db.prepare(`SELECT rp.order_id, COUNT(*) as total, SUM(CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END) as scheduled
+      const rows = db.prepare(`SELECT rp.order_id, COUNT(*) as total,
+        SUM(CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END) as scheduled,
+        SUM(CASE WHEN cs.is_project THEN 1 ELSE 0 END) as project_count
         FROM requirement_points rp LEFT JOIN ccb_schedules cs ON cs.point_id=rp.id
         WHERE rp.order_id IN (${placeholders}) GROUP BY rp.order_id`).all(...orderIds);
       const map = {};
-      rows.forEach(r => { map[r.order_id] = { total: r.total, scheduled: r.scheduled }; });
+      rows.forEach(r => { map[r.order_id] = { total: r.total, scheduled: r.scheduled, project_count: r.project_count || 0 }; });
       return map;
     };
     const allIds = (result.items || []).map(o => o.id);
@@ -664,9 +666,17 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         // --- 1. 创建/匹配需求单 ---
         const rds = row['关联部门'] ? String(row['关联部门']).trim() : '';
         const r = insO.run(on, row['需求单名称']||'', row['业务部门']||'', rds, row['提出人']||'', normalizeDate(row['提出日期']), row['业务上线预期']||'');
-        if (r.changes > 0) orderCount++;
+        const isNewOrder = r.changes > 0;
+        if (isNewOrder) orderCount++;
         const order = db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(on);
         if (!order) continue;
+
+        if (!isNewOrder) {
+          // 订单已存在 → 跳过已导入的需求点，避免重复
+          warnings.push(`第${rowNum}行：需求单"${on}"已存在，跳过该行需求点导入`);
+          skipped++;
+          continue;
+        }
 
         // --- 2. 创建需求点 ---
         if (!row['需求点描述']) {
@@ -690,7 +700,7 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         // 初始化序号
         if (!orderSeqs[on]) {
           const maxP = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1").get(order.id);
-          orderSeqs[on] = maxP ? (parseInt((maxP.point_number.match(/\d+$/)||[])[0]) || 0) + 1 : 1;
+          orderSeqs[on] = maxP ? (parseInt((maxP.point_number.match(/(\d{3})$/)||[])[1]) || 0) + 1 : 1;
         }
 
         // 用户指定需求点编号处理

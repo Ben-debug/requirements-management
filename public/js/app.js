@@ -254,6 +254,7 @@ async function loadOrders() {
       const rds = o.related_departments ? o.related_departments.split(',').filter(Boolean) : [];
       // 计算排期状态
       var schedCount = (o.schedule_summary||{}).scheduled || 0, totalPoints = (o.schedule_summary||{}).total || 0;
+	      var projCount = (o.schedule_summary||{}).project_count || 0;
       var schedHtml = '';
       if (totalPoints === 0) {
         schedHtml = '<span style="font-size:12px;color:#999">—</span>';
@@ -263,6 +264,7 @@ async function loadOrders() {
         schedHtml = '<span style="font-size:12px;color:#fa8c16;font-weight:500">⏳ ' + schedCount + '/' + totalPoints + '</span>';
       } else {
         schedHtml = '<span style="font-size:12px;color:#ff4d4f;font-weight:500">⏳ 0/' + totalPoints + '</span>';
+	      const projHtml = projCount ? '<span class="badge badge-orange" style="margin-left:4px">📋 立项</span>' : '';
       }
       return `<tr>
       <td><a href="javascript:void(0)" onclick="window.viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
@@ -270,7 +272,7 @@ async function loadOrders() {
       <td>${rds.length ? rds.map(d=>'<span class="badge badge-blue">'+esc(d.trim())+'</span>').join(' ') : '-'}</td>
       <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
-      <td style="text-align:center">${schedHtml}</td>
+      <td style="text-align:center">${schedHtml}${projHtml}</td>
       <td><div class="action-group"><button class="btn btn-sm" onclick="window.viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="window.editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="window.deleteOrder(${o.id})">删除</button></div></td>
     </tr>`;
     }

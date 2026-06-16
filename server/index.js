@@ -195,6 +195,7 @@ app.post('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
     const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
+    if (!/^[A-Z]\d+$/.test(order_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需大写字母开头+数字，如 A01）' });
     if (db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(order_number)) return res.status(400).json({ success: false, message: '编号已存在' });
     const rds = related_departments ? (Array.isArray(related_departments) ? related_departments.join(',') : related_departments) : '';
     const nd = normalizeDate(propose_date);
@@ -209,7 +210,7 @@ app.put('/api/orders/:id', (req, res) => {
     const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
     // 如果修改了编号，检查唯一性
     if (order_number) {
-      if (!/^[A-Z]\d{2}$/.test(order_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需1大写字母+2数字）' });
+        if (!/^[A-Z]\d+$/.test(order_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需大写字母开头+数字，如 A01）' });
       const dup = db.prepare('SELECT id FROM requirement_orders WHERE order_number=? AND id!=?').get(order_number, req.params.id);
       if (dup) return res.status(400).json({ success: false, message: '该编号已被其他需求单使用' });
     }
@@ -653,8 +654,8 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         rowNum++;
         const on = row['需求单编号'];
         if (!on || !String(on).trim()) { continue; }
-        if (!/^[A-Z]\d{2}$/.test(String(on))) {
-          warnings.push(`第${rowNum}行：需求单编号"${on}"格式不正确（需1大写字母+2数字），已跳过`);
+        if (!/^[A-Z]\d+$/.test(String(on))) {
+          warnings.push(`第${rowNum}行：需求单编号"${on}"格式不正确（需大写字母开头+数字），已跳过`);
           skipped++;
           continue;
         }

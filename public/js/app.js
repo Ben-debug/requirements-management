@@ -374,8 +374,8 @@ document.getElementById('order-form')?.addEventListener('submit', async e => {
   }
   // 校验
   let hasError = false;
-  if (!data.order_number || !/^[A-Z]\d{2}$/.test(data.order_number)) {
-    showFieldError('order_number', '格式：1位大写字母+2位数字（如 A01）');
+  if (!data.order_number || !/^[A-Z]\d+$/.test(data.order_number)) {
+    showFieldError('order_number', '格式：大写字母开头+数字（如 A01）');
     hasError = true;
   }
   if (!data.name || !data.name.trim()) {

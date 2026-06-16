@@ -21,6 +21,7 @@ function navigate(page) {
   state.currentPage = page;
   document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  document.querySelector('.top-nav').dataset.page = page;
   document.querySelectorAll('.page-content').forEach(e => e.style.display = 'none');
   document.getElementById(`page-${page}`).style.display = 'block';
   if (page === 'orders') { state.orderPage = 1; loadOrders(); }
@@ -86,7 +87,10 @@ function renderSystemCheckboxes(containerId, systems, selectedArr) {
   });
 }
 
-function getSelectedSystems() { return Array.from(document.querySelectorAll('.system-cb:checked')).map(cb => cb.value); }
+function getSelectedSystems(containerId) {
+  const root = containerId ? document.getElementById(containerId) : document;
+  return Array.from(root.querySelectorAll('.system-cb:checked')).map(cb => cb.value);
+}
 function esc(str) { if (!str) return ''; const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
 // ---- Config Accordion ----
@@ -240,18 +244,18 @@ async function loadOrders() {
     }
     
     if (r.grouped) {
-      // 分组展示
+      // 分组展示（可折叠，无分页）
       let html = '';
       Object.keys(r.grouped).sort().forEach(key => {
-        html += `<tr style="background:#e6f7ff"><td colspan="9" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${r.grouped[key].length}条)</td></tr>`;
+        html += `<tr class="group-header" onclick="toggleOrderGroup(this)" data-collapsed="false"><td colspan="9" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff;background:#e6f7ff;cursor:pointer;user-select:none">📁 ${esc(key)}（${r.grouped[key].length}条） <span class="group-arrow" style="float:right;margin-right:8px">▼</span></td></tr>`;
         r.grouped[key].forEach(o => { html += orderRow(o); });
       });
       tbody.innerHTML = html;
+      document.getElementById('orders-pagination').innerHTML = '';
     } else {
       tbody.innerHTML = r.items.map(o => orderRow(o)).join('');
+      renderPagination('orders-pagination', r);
     }
-    
-    renderPagination('orders-pagination', r);
     if (r.filters?.departments) {
       const sel = document.getElementById('filter-department');
       if (sel && sel.options.length <= 1) {
@@ -306,6 +310,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function gotoOrderPage(p) { state.orderPage = p; loadOrders(); }
 function gotoSchedulePage(p) { state.schedulePage = p; applyFilter(); }
+
+// 折叠/展开分组
+function toggleOrderGroup(header) {
+  const isCollapsed = header.dataset.collapsed === 'true';
+  let el = header.nextElementSibling;
+  while (el && el.tagName === 'TR' && !el.classList.contains('group-header')) {
+    el.style.display = isCollapsed ? '' : 'none';
+    el = el.nextElementSibling;
+  }
+  header.dataset.collapsed = isCollapsed ? 'false' : 'true';
+  header.querySelector('.group-arrow').textContent = isCollapsed ? '▼' : '▶';
+}
 
 document.getElementById('order-form')?.addEventListener('submit', async e => {
   e.preventDefault();
@@ -377,7 +393,7 @@ function updatePointBatchPreview() {
   const preview = document.getElementById('point-batch-preview');
   if (!preview) return;
   if (batch && orderNum) {
-    preview.textContent = `→ 子单 ${batch}（仅分组，编号格式为 ${orderNum}-001）`;
+    preview.textContent = `→ 子单 ${batch}（仅分组，编号格式为 ${orderNum}001）`;
   } else {
     preview.textContent = '';
   }
@@ -713,24 +729,60 @@ async function batchScheduleSubOrder(orderId, batch) {
   const points = o.points.filter(p => p.sub_batch === batch);
   const unscheduled = points.filter(p => !(p.schedule_system || p.schedule_id));
   if (!unscheduled.length) { showToast('该批次已全部排期','info'); return; }
-  
+
   // 获取会议、系统、版本列表
   const [s, v, meetings] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings')]);
   if (!meetings.data.length) { showToast('请先创建CCB会议','error'); navigate('meetings'); return; }
-  
-  // 填充弹窗
+
+  // 填充会议下拉
   const mtgSelect = document.getElementById('batch-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">请选择CCB会议</option>';
   meetings.data.forEach(m => { const o2 = document.createElement('option'); o2.value = m.id; o2.textContent = m.meeting_name+' ('+m.meeting_date+')'; mtgSelect.appendChild(o2); });
-  renderSystemCheckboxes('batch-schedule-systems', s.data, []);
-  const verSelect = document.getElementById('batch-schedule-version');
-  verSelect.innerHTML = '<option value="">请选择版本</option>';
-  v.data.forEach(x => { const o2 = document.createElement('option'); o2.value = x; o2.textContent = x; verSelect.appendChild(o2); });
-  
+
+  // 渲染逐点系统/版本
+  const container = document.getElementById('batch-schedule-points');
+  container.innerHTML = '';
+  unscheduled.forEach((p, idx) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:10px;margin-bottom:6px;background:#fafafa;border-radius:6px;border-left:3px solid #1890ff';
+    div.innerHTML = `
+      <div style="font-weight:600;font-size:13px;color:#333;margin-bottom:8px">
+        ${esc(p.point_number)} ${esc(p.description)}
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+        <div>
+          <div style="font-size:12px;color:#999;margin-bottom:4px">涉及系统</div>
+          <div id="bps-${p.id}" style="display:flex;flex-wrap:wrap;gap:2px"></div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#999;margin-bottom:4px">上线版本</div>
+          <select id="bpv-${p.id}" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
+            <option value="">请选择版本</option>
+          </select>
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+    // 渲染该点的系统checkbox
+    const sysCtr = document.getElementById('bps-'+p.id);
+    (s.data||[]).forEach(sys => {
+      const lbl = document.createElement('label');
+      lbl.style.cssText = 'display:inline-flex;align-items:center;gap:3px;padding:4px 8px;margin:2px;border:1px solid #d9d9d9;border-radius:4px;cursor:pointer;font-size:12px';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = sys; cb.className = 'system-cb';
+      lbl.appendChild(cb); lbl.appendChild(document.createTextNode(sys));
+      lbl.onmouseover = () => lbl.style.borderColor = '#1890ff';
+      lbl.onmouseout = () => lbl.style.borderColor = '#d9d9d9';
+      sysCtr.appendChild(lbl);
+    });
+    // 渲染该点的版本下拉
+    const verSel = document.getElementById('bpv-'+p.id);
+    v.data.forEach(x => { const o2 = document.createElement('option'); o2.value = x; o2.textContent = x; verSel.appendChild(o2); });
+  });
+
   // 存储批次信息
   document.getElementById('batch-schedule-order-id').value = orderId;
   document.getElementById('batch-schedule-batch').value = batch;
-  document.getElementById('batch-schedule-count').textContent = `待排期 ${unscheduled.length} 项（${orderNumDisplay()}-${batch}）`;
+  document.getElementById('batch-schedule-count').textContent = `待排期 ${unscheduled.length} 项（${o.order_number}-${batch}）`;
   openModal('batch-schedule-modal');
 }
 
@@ -740,28 +792,37 @@ function orderNumDisplay() {
 
 async function confirmBatchSchedule() {
   const meetingId = document.getElementById('batch-schedule-meeting').value;
-  const systems = getSelectedSystems();
-  const version = document.getElementById('batch-schedule-version').value;
   const orderId = parseInt(document.getElementById('batch-schedule-order-id').value);
   const batch = document.getElementById('batch-schedule-batch').value;
-  
+
   if (!meetingId) { showToast('请选择CCB会议','error'); return; }
-  if (!systems.length) { showToast('请至少选择一个系统','error'); return; }
-  if (!version) { showToast('请选择版本','error'); return; }
-  
+
   // 找到该批次下所有未排期点
   const o = (await api(`/api/orders/${orderId}`)).data;
   const unscheduled = o.points.filter(p => p.sub_batch === batch && !(p.schedule_system || p.schedule_id));
   if (!unscheduled.length) { showToast('暂无待排期项','info'); closeModal('batch-schedule-modal'); return; }
-  
+
+  // 逐点读取系统和版本
+  const schedules = [];
+  const skipped = [];
+  unscheduled.forEach(p => {
+    const systems = getSelectedSystems('bps-'+p.id);
+    const version = document.getElementById('bpv-'+p.id).value;
+    if (!systems.length || !version) {
+      skipped.push(`${p.point_number}（${!systems.length ? '缺系统' : ''}${!systems.length && !version ? '、' : ''}${!version ? '缺版本' : ''}）`);
+      return;
+    }
+    schedules.push({
+      order_id: orderId,
+      point_id: p.id,
+      system: systems.join(','),
+      version
+    });
+  });
+
+  if (!schedules.length) { showToast('未配置任何需求点的系统和版本，请逐点填写','error'); return; }
+
   // 批量提交排期
-  const schedules = unscheduled.map(p => ({
-    order_id: orderId,
-    point_id: p.id,
-    system: systems.join(','),
-    version
-  }));
-  
   try {
     const r = await fetch(`/api/meetings/${meetingId}/schedules/batch`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -769,7 +830,9 @@ async function confirmBatchSchedule() {
     });
     const d = await r.json();
     if (!d.success) throw new Error(d.message);
-    showToast(`排期成功：${d.data.count} 项`,'success');
+    let msg = `排期成功：${d.data.count} 项`;
+    if (skipped.length) msg += `，跳过 ${skipped.length} 项（${skipped.join('；')}）`;
+    showToast(msg, 'success');
     closeModal('batch-schedule-modal');
     viewOrder(orderId);
   } catch(e) { showToast(e.message,'error'); }

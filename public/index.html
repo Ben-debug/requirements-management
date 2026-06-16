@@ -10,7 +10,7 @@
 <div id="toast-container" class="toast-container"></div>
 
 <!-- Top Navigation -->
-<nav class="top-nav">
+<nav class="top-nav" data-page="orders">
   <div class="brand">📋 需求单信息管理 <span>Requirement Order Manager</span></div>
   <div class="nav-items">
     <div class="nav-item active" data-page="orders" onclick="navigate('orders')">📄 需求单管理</div>
@@ -356,17 +356,19 @@
 </div></div>
 
 <!-- Batch Schedule Modal -->
-<div id="batch-schedule-modal" class="modal-overlay"><div class="modal" style="max-width:520px">
+<div id="batch-schedule-modal" class="modal-overlay"><div class="modal" style="max-width:640px">
   <div class="modal-header"><h3>整批排期</h3><button class="modal-close" onclick="closeModal('batch-schedule-modal')">×</button></div>
   <div class="modal-body">
     <p id="batch-schedule-count" style="font-size:13px;color:#666;margin-bottom:12px"></p>
     <div class="form-group"><label>CCB会议 <span class="required">*</span></label><select id="batch-schedule-meeting" class="form-control"></select></div>
-    <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="batch-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
-    <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="batch-schedule-version" class="form-control"></select></div>
+    <div style="margin-top:16px">
+      <label style="font-size:14px;font-weight:500;margin-bottom:8px;display:block">需求点列表（逐点设置系统和版本）</label>
+      <div id="batch-schedule-points" style="max-height:400px;overflow-y:auto;border:1px solid #e8e8e8;border-radius:6px;padding:8px"></div>
+    </div>
     <input type="hidden" id="batch-schedule-order-id">
     <input type="hidden" id="batch-schedule-batch">
   </div>
-  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('batch-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmBatchSchedule()" title="确认将该子单批次下所有需求点排入所选CCB会议，整批使用相同的系统和版本">确认整批排期</button></div>
+  <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('batch-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmBatchSchedule()">确认整批排期</button></div>
 </div></div>
 
 <!-- Config Add Modal -->

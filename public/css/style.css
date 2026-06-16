@@ -10,6 +10,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Micr
 .top-nav .nav-item:hover{color:#fff;background:rgba(255,255,255,.08)}
 .top-nav .nav-item.active{color:#fff;border-bottom-color:#e94560;background:rgba(255,255,255,.1)}
 
+/* 页面主题色：
+   需求单管理-蓝 / CCB排期管理-绿 / 流转文件-橙 / 参数配置-紫 */
+.top-nav[data-page="orders"] .nav-item.active{border-bottom-color:#1890ff}
+.top-nav[data-page="meetings"] .nav-item.active{border-bottom-color:#52c41a}
+.top-nav[data-page="files"] .nav-item.active{border-bottom-color:#fa8c16}
+.top-nav[data-page="config"] .nav-item.active{border-bottom-color:#722ed1}
+
+/* 子Tab跟随主页面颜色 */
+#page-meetings .tab-item.active{color:#52c41a;border-bottom-color:#52c41a}
+#page-meetings .tab-item:hover{color:#52c41a}
+#detail-modal .detail-tab-item.active{color:#1890ff;border-bottom-color:#1890ff}
+#detail-modal .detail-tab-item:hover{color:#1890ff}
+
 .main-content{padding:24px;max-width:1400px;margin:0 auto}
 .page-header{margin-bottom:20px}
 .page-header h2{font-size:20px;font-weight:600;color:#1a1a1a}

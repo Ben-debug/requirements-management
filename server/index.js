@@ -206,14 +206,14 @@ app.post('/api/orders/:orderId/points', (req, res) => {
     const db = getDatabase(); const { description, sub_batch } = req.body;
     const order = db.prepare('SELECT order_number FROM requirement_orders WHERE id=?').get(req.params.orderId);
     if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-    // 自动生成编号: 需求单编号-3位顺序号 (如 A01-001)
+    // 自动生成编号: 需求单编号+3位顺序号 (如 A01001)
     const max = db.prepare("SELECT point_number FROM requirement_points WHERE order_id=? ORDER BY id DESC LIMIT 1").get(req.params.orderId);
     let seq = 1;
     if (max) {
       const m = max.point_number.match(/(\d{3})$/);
       seq = m ? parseInt(m[1]) + 1 : 1;
     }
-    const pointNumber = `${order.order_number}-${String(seq).padStart(3,'0')}`;
+    const pointNumber = `${order.order_number}${String(seq).padStart(3,'0')}`;
     const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch || null);
     res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -656,13 +656,13 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         const rawPN = row['需求点编号'] ? String(row['需求点编号']).trim() : '';
         let useManualPN = false;
         if (rawPN) {
-          const pnMatch = rawPN.match(/^[A-Z]\d{2}-(\d+)$/);
+          const pnMatch = rawPN.match(/^[A-Z]\d{2}(\d{1,3})$/);
           if (pnMatch) {
             const userSeq = parseInt(pnMatch[1]);
             if (userSeq >= orderSeqs[on]) orderSeqs[on] = userSeq;
             useManualPN = true;
           } else {
-            warnings.push(`第${rowNum}行：需求点编号"${rawPN}"格式无效（应为${on}-N格式），已自动生成编号`);
+            warnings.push(`第${rowNum}行：需求点编号"${rawPN}"格式无效（应为${on}NNN格式，如${on}001），已自动生成编号`);
           }
         }
 
@@ -670,7 +670,7 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         const createdPoints = [];
         descs.forEach((d, i) => {
           const seq = orderSeqs[on]++;
-          const pointNumber = useManualPN && i === 0 ? rawPN : `${on}-${String(seq)}`;
+          const pointNumber = useManualPN && i === 0 ? rawPN : `${on}${String(seq).padStart(3,'0')}`;
           const result = insP.run(order.id, pointNumber, d.trim(), sysArr[i]||'', verArr[i]||'');
           createdPoints.push({ id: result.lastInsertRowid, system: sysArr[i]||'', version: verArr[i]||'' });
           pointCount++;
@@ -708,7 +708,7 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
 // ---- 目录浏览（供前端文件夹选择器使用） ----
 app.get('/api/config/browse', (req, res) => {
   try {
-    const dirPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
+    let dirPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
     // 安全检查：禁止浏览 node_modules 等敏感目录
     const resolvedPath = path.resolve(dirPath);
     if (resolvedPath.includes('node_modules')) return res.json({ success: true, data: { current: dirPath, parent: null, subdirs: [] } });

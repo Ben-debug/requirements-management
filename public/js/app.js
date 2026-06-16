@@ -48,6 +48,38 @@ function switchDetailTab(tab) {
   document.getElementById('dtab-' + tab).style.display = 'block';
 }
 
+/** 显示导入/导出结果弹窗 */
+function showResultModal(options) {
+  const { title, type, stats, warnings, filename } = options;
+  document.getElementById('result-modal-title').textContent = title || '📊 结果';
+  let html = '';
+  // 状态图标
+  const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+  html += `<div style="text-align:center;font-size:16px;font-weight:600;margin-bottom:16px">${icon} ${type === 'success' ? '操作成功' : type === 'error' ? '操作失败' : ''}</div>`;
+  // 统计面板
+  if (stats && stats.length) {
+    html += '<div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;padding:12px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:8px">';
+    stats.forEach(s => {
+      html += `<div style="flex:1;min-width:100px;text-align:center"><div style="font-size:22px;font-weight:700;color:#52c41a">${s.count}</div><div style="font-size:12px;color:#666">${s.label}</div></div>`;
+    });
+    html += '</div>';
+  }
+  // 文件名（导出）
+  if (filename) {
+    html += `<div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#666">📎 ${esc(filename)}</div>`;
+  }
+  // 警告
+  if (warnings && warnings.length) {
+    html += `<div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;padding:10px 12px">`;
+    html += `<div style="font-weight:600;font-size:13px;color:#d48806;margin-bottom:6px">⚠️ 警告（${warnings.length}条）</div>`;
+    html += `<div style="max-height:200px;overflow-y:auto;font-size:13px;color:#666">`;
+    warnings.forEach(w => { html += `<div style="padding:2px 0">• ${esc(w)}</div>`; });
+    html += '</div></div>';
+  }
+  document.getElementById('result-modal-body').innerHTML = html;
+  openModal('result-modal');
+}
+
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 document.querySelectorAll('.modal-overlay').forEach(el => {
@@ -1172,18 +1204,35 @@ function renderScheduleResults(result) {
 }
 
 document.getElementById('filter-group')?.addEventListener('change', () => { state.schedulePage = 1; applyFilter(); });
-function exportExcel() { window.open("/api/export","_blank"); showToast("正在导出...","info"); }
+function exportExcel() { doExport('/api/export'); }
 function exportFiltered() {
   const params = getFilterParams();
   delete params.page;
   delete params.pageSize;
   const qs = Object.entries(params).map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('&');
-  if (qs) {
-    window.open(`/api/export/filtered?${qs}`,'_blank');
-  } else {
-    window.open('/api/export','_blank');
-  }
+  doExport(qs ? `/api/export/filtered?${qs}` : '/api/export');
+}
+async function doExport(url) {
   showToast('正在导出...','info');
+  try {
+    const r = await fetch(url);
+    if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.message || '导出失败'); }
+    const blob = await r.blob();
+    // 从 Content-Disposition 或 URL 提取文件名
+    const cd = r.headers.get('Content-Disposition');
+    let filename = `需求单信息-${new Date().toISOString().slice(0,10)}.xlsx`;
+    if (cd) { const m = cd.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i); if (m) filename = decodeURIComponent(m[1]); }
+    // 触发下载
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    showResultModal({
+      title: '📤 导出完成',
+      type: 'success',
+      stats: [{ label: '导出文件', count: 1 }],
+      filename
+    });
+  } catch(e) { showToast(e.message, 'error'); }
 }
 
 // ---- 流转文件管理 ----
@@ -1284,16 +1333,23 @@ function downloadTemplate() { window.open('/api/import/template','_blank'); }
 document.getElementById('import-file')?.addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   const fd = new FormData(); fd.append('file',f);
+  showToast('正在导入...','info');
   try {
     const r = await fetch('/api/import',{method:'POST',body:fd});
     const d = await r.json();
     if (!d.success) throw new Error(d.message);
-    let msg = `导入完成：${d.data.orderCount}个订单, ${d.data.pointCount}个需求点`;
-    if (d.data.meetingCount) msg += `, ${d.data.meetingCount}个会议`;
-    if (d.data.scheduleCount) msg += `, ${d.data.scheduleCount}条排期`;
-    if (d.data.warnings?.length) msg += `, ${d.data.warnings.length}条警告`;
-    showToast(msg, 'info');
-    if (d.data.warnings?.length) console.warn('导入警告:', d.data.warnings);
+    const stats = [
+      { label: '需求单', count: d.data.orderCount },
+      { label: '需求点', count: d.data.pointCount }
+    ];
+    if (d.data.meetingCount) stats.push({ label: '会议', count: d.data.meetingCount });
+    if (d.data.scheduleCount) stats.push({ label: '排期', count: d.data.scheduleCount });
+    showResultModal({
+      title: '📊 导入结果',
+      type: 'success',
+      stats,
+      warnings: d.data.warnings
+    });
     e.target.value=''; loadOrders();
   } catch(e) { showToast(e.message,'error'); }
 });

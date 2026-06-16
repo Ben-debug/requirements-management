@@ -378,6 +378,15 @@
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('config-modal')">取消</button><button type="button" class="btn btn-primary" onclick="addConfigItem()">保存</button></div>
 </div></div>
 
+<!-- Import / Export Result Modal -->
+<div id="result-modal" class="modal-overlay"><div class="modal" style="max-width:520px">
+  <div class="modal-header"><h3 id="result-modal-title">📊 结果</h3><button class="modal-close" onclick="closeModal('result-modal')">×</button></div>
+  <div class="modal-body">
+    <div id="result-modal-body"></div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-primary" onclick="closeModal('result-modal')">关闭</button></div>
+</div></div>
+
 <!-- Folder Picker Modal -->
 <div id="folder-picker-modal" class="modal-overlay"><div class="modal" style="max-width:600px">
   <div class="modal-header"><h3>📁 选择文件夹</h3><button class="modal-close" onclick="closeModal('folder-picker-modal')">×</button></div>

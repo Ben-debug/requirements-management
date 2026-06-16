@@ -4,7 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const xlsx = require('xlsx');
 const fs = require('fs');
-const { getDatabase, initDataDir } = require('./database');
+const { getDatabase, initDataDir, reopenDatabase } = require('./database');
 const config = require('./config');
 
 const app = express();
@@ -779,13 +779,11 @@ app.post('/api/config/paths', (req, res) => {
     const { data_dir, flow_files_dir, meeting_files_dir } = req.body || {};
     if (data_dir !== undefined) {
       config.setPath('data_dir', data_dir);
-      // 新目录写一份 config.json，使用户能在新路径看到配置文件
       if (data_dir) {
-        if (!fs.existsSync(data_dir)) fs.mkdirSync(data_dir, { recursive: true });
-        const newCfg = path.join(data_dir, 'config.json');
-        if (!fs.existsSync(newCfg)) {
-          fs.writeFileSync(newCfg, JSON.stringify(config.getAll(), null, 2), 'utf-8');
-        }
+        // 立即切换配置读取路径到新目录
+        config.setConfigDir(data_dir);
+        // 立即迁移并重新打开数据库
+        reopenDatabase(data_dir);
       }
     }
     if (flow_files_dir !== undefined) config.setPath('flow_files_dir', flow_files_dir);
@@ -793,7 +791,7 @@ app.post('/api/config/paths', (req, res) => {
     // 确保新目录存在
     if (flow_files_dir && !fs.existsSync(flow_files_dir)) fs.mkdirSync(flow_files_dir, { recursive: true });
     if (meeting_files_dir && !fs.existsSync(meeting_files_dir)) fs.mkdirSync(meeting_files_dir, { recursive: true });
-    res.json({ success: true, message: '路径设置已保存。文件目录立即生效，data目录变更需重启服务生效（重启后自动迁移旧数据）' });
+    res.json({ success: true, message: '路径设置已保存，已立即生效' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

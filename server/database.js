@@ -33,6 +33,34 @@ function initDataDir(dir) {
 const DB_PATH = path.join(getDataDir(), 'requirements.db');
 let db;
 
+/**
+ * 重新打开数据库（用于 data_dir 热切换，无需重启服务）
+ * 1. 将旧库复制到新路径（如果还不存在）
+ * 2. 关闭旧连接，切换 customDataDir，在新路径上重建连接
+ */
+function reopenDatabase(newDir) {
+  if (!newDir || newDir === getDataDir()) return;
+  if (!fs.existsSync(newDir)) fs.mkdirSync(newDir, { recursive: true });
+  // 迁移数据库文件到新路径
+  const oldPath = path.join(getDataDir(), 'requirements.db');
+  const newPath = path.join(newDir, 'requirements.db');
+  if (!fs.existsSync(newPath) && fs.existsSync(oldPath)) {
+    // WAL 模式需先 checkpoint 确保数据完整性
+    if (db) db.pragma('wal_checkpoint(TRUNCATE)');
+    fs.copyFileSync(oldPath, newPath);
+    for (const ext of ['-wal', '-shm']) {
+      const f = oldPath + ext;
+      if (fs.existsSync(f)) fs.copyFileSync(f, newPath + ext);
+    }
+  }
+  // 关闭旧连接
+  if (db) { try { db.close(); } catch(e) {} db = null; }
+  // 切换目录
+  customDataDir = newDir;
+  // 重新打开（getDatabase 会走新路径）
+  getDatabase();
+}
+
 function getDatabase() {
   if (!db) {
     const dataDir = getDataDir();
@@ -93,4 +121,4 @@ function initDatabase() {
   try { db.exec("ALTER TABLE requirement_orders ADD COLUMN background TEXT"); } catch(e) {}
 }
 
-module.exports = { getDatabase, initDataDir };
+module.exports = { getDatabase, initDataDir, reopenDatabase };

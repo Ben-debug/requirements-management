@@ -264,7 +264,7 @@ async function loadOrders() {
         schedHtml = '<span style="font-size:12px;color:#fa8c16;font-weight:500">⏳ ' + schedCount + '/' + totalPoints + '</span>';
       } else {
         schedHtml = '<span style="font-size:12px;color:#ff4d4f;font-weight:500">⏳ 0/' + totalPoints + '</span>';
-	      const projHtml = projCount ? '<span class="badge badge-orange" style="margin-left:4px">📋 立项</span>' : '';
+      var projHtml = projCount ? '<span class="badge badge-orange" style="margin-left:4px">📋 立项</span>' : '';
       }
       return `<tr>
       <td><a href="javascript:void(0)" onclick="window.viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>

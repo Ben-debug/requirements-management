@@ -402,25 +402,33 @@ app.post('/api/meetings/:meetingId/schedules/batch', (req, res) => {
   try {
     const db = getDatabase(); const { schedules } = req.body;
     if (!schedules||!schedules.length) return res.status(400).json({ success: false, message: '请选择排期' });
-    const ins = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version) VALUES (?,?,?,?,?)');
+    const ins = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_code,project_name) VALUES (?,?,?,?,?,?,?,?)');
     const upd = db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?');
-    db.transaction(() => { schedules.forEach(s => { ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version); upd.run(s.system, s.version, s.point_id); }); })();
+    db.transaction(() => { schedules.forEach(s => { ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version, s.is_project||0, s.project_code||null, s.project_name||null); upd.run(s.system, s.version, s.point_id); }); })();
     res.json({ success: true, data: { count: schedules.length } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.post('/api/meetings/:meetingId/schedules', (req, res) => {
-  try { const db = getDatabase(); const { order_id, point_id, system, version } = req.body; db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version) VALUES (?,?,?,?,?)').run(req.params.meetingId, order_id, point_id, system, version); db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, point_id); res.json({ success: true }); }
+  try {
+    const db = getDatabase(); const { order_id, point_id, system, version, is_project, project_code, project_name } = req.body;
+    db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_code,project_name) VALUES (?,?,?,?,?,?,?,?)').run(req.params.meetingId, order_id, point_id, system, version, is_project||0, project_code||null, project_name||null);
+    db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, point_id);
+    res.json({ success: true });
+  }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.put('/api/schedules/:id', (req, res) => {
   try {
-    const db = getDatabase(); const { system, version, meeting_id } = req.body;
+    const db = getDatabase(); const { system, version, meeting_id, is_project, project_code, project_name } = req.body;
     const schedule = db.prepare('SELECT * FROM ccb_schedules WHERE id=?').get(req.params.id);
     if (!schedule) return res.status(404).json({ success: false });
-    if (meeting_id && meeting_id != schedule.meeting_id) db.prepare('UPDATE ccb_schedules SET meeting_id=?, system=?, version=? WHERE id=?').run(meeting_id, system, version, req.params.id);
-    else db.prepare('UPDATE ccb_schedules SET system=?, version=? WHERE id=?').run(system, version, req.params.id);
+    const pi = is_project!==undefined ? (is_project||0) : schedule.is_project;
+    const pc = project_code!==undefined ? (project_code||null) : schedule.project_code;
+    const pn = project_name!==undefined ? (project_name||null) : schedule.project_name;
+    if (meeting_id && meeting_id != schedule.meeting_id) db.prepare('UPDATE ccb_schedules SET meeting_id=?, system=?, version=?, is_project=?, project_code=?, project_name=? WHERE id=?').run(meeting_id, system, version, pi, pc, pn, req.params.id);
+    else db.prepare('UPDATE ccb_schedules SET system=?, version=?, is_project=?, project_code=?, project_name=? WHERE id=?').run(system, version, pi, pc, pn, req.params.id);
     db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, schedule.point_id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -549,18 +557,23 @@ function exportOrdersToExcel(orders, res) {
   const rows = [];
   for (const o of orders) {
     const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(o.id);
+    const projCols = {'是否立项':'','项目编号':'','项目名称':''};
     if (points.length === 0) {
-      rows.push({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','关联部门':o.related_departments||'','提出人':o.proposer||'','提出日期':o.propose_date||'','提出背景':o.background||'', '业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''});
+      rows.push(Object.assign({'需求单编号':o.order_number,'需求单名称':o.name,'业务部门':o.department||'','关联部门':o.related_departments||'','提出人':o.proposer||'','提出日期':o.propose_date||'','提出背景':o.background||'', '业务上线预期':o.business_launch_date||'','需求点编号':'','需求点描述':'','涉及系统':'','上线版本':'','CCB会议':'','排期日期':''}, projCols));
     } else {
       for (const p of points) {
         const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
-        rows.push({
+        rows.push(Object.assign({
           '需求单编号':o.order_number, '需求单名称':o.name, '业务部门':o.department||'', '关联部门':o.related_departments||'',
           '提出人':o.proposer||'', '提出日期':o.propose_date||'', '业务上线预期':o.business_launch_date||'',
           '需求点编号':p.point_number, '需求点描述':p.description,
           '涉及系统':sche ? sche.system : (p.system||''), '上线版本':sche ? sche.version : (p.version||''),
           'CCB会议':sche ? sche.meeting_name : '', '排期日期':sche ? sche.meeting_date : ''
-        });
+        }, {
+          '是否立项': sche ? (sche.is_project ? '是' : '否') : '',
+          '项目编号': sche ? (sche.project_code||'') : '',
+          '项目名称': sche ? (sche.project_name||'') : ''
+        }));
       }
     }
   }
@@ -583,21 +596,20 @@ app.get('/api/export', (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// 导入模板下载
+// 导入模板下载（程序生成，始终与导入逻辑一致）
 app.get('/api/import/template', (req, res) => {
   try {
-    const templateDir = path.join(ROOT_DIR, 'Release');
-    const possiblePaths = [
-      path.join(templateDir, '需求单导入模板.xlsx'),
-      path.join(ROOT_DIR, '需求单导入模板.xlsx'),
-    ];
-    for (const fp of possiblePaths) {
-      if (fs.existsSync(fp)) {
-        return res.download(fp, '需求单导入模板.xlsx');
-      }
-    }
-    res.status(404).json({ success: false, message: '模板文件不存在，请联系管理员' });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    const wb = xlsx.utils.book_new();
+    const ws = xlsx.utils.aoa_to_sheet([
+      ['需求单编号','需求单名称','业务部门','关联部门','提出人','提出日期','业务上线预期','需求点编号','需求点描述','涉及系统','上线版本','CCB会议','会议日期','会议备注','是否立项','项目编号','项目名称'],
+      ['A01','示例需求','交易中心','清算部,交割储运部','张三','2026-06-01','2026-07-15','','示例功能描述','交易系统','v1.0','6月CCB会议','2026-06-20','','是','D93-2','先进先出项目'],
+      ['A01','','','','','','','','功能二 | 功能三','交易系统 | 清算系统','v1.0 | v2.0','','','','否','',''],
+    ]);
+    xlsx.utils.book_append_sheet(wb, ws, '需求单');
+    const tmpPath = path.join(getUploadBaseDir(), 'template_' + Date.now() + '.xlsx');
+    xlsx.writeFile(wb, tmpPath);
+    res.download(tmpPath, '需求单导入模板.xlsx', () => { try { fs.unlinkSync(tmpPath); } catch(e){} });
+  } catch (err) { res.status(500).json({ success: false, message: '模板生成失败：' + err.message }); }
 });
 
 app.post('/api/import', uploadTemp.single('file'), (req, res) => {
@@ -631,9 +643,9 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
     const db = getDatabase();
     let orderCount = 0, pointCount = 0, meetingCount = 0, scheduleCount = 0, skipped = 0;
     const warnings = [];
-    const insO = db.prepare('INSERT OR IGNORE INTO requirement_orders (order_number,name,department,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?)');
+    const insO = db.prepare('INSERT OR IGNORE INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date) VALUES (?,?,?,?,?,?,?)');
     const insP = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,system,version) VALUES (?,?,?,?,?)');
-    const insS = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version) VALUES (?,?,?,?,?)');
+    const insS = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_code,project_name) VALUES (?,?,?,?,?,?,?,?)');
     const updP = db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?');
     const orderSeqs = {};
     let rowNum = 0;
@@ -650,7 +662,8 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
         }
 
         // --- 1. 创建/匹配需求单 ---
-        const r = insO.run(on, row['需求单名称']||'', row['业务部门']||'', row['提出人']||'', normalizeDate(row['提出日期']), row['业务上线预期']||'');
+        const rds = row['关联部门'] ? String(row['关联部门']).trim() : '';
+        const r = insO.run(on, row['需求单名称']||'', row['业务部门']||'', rds, row['提出人']||'', normalizeDate(row['提出日期']), row['业务上线预期']||'');
         if (r.changes > 0) orderCount++;
         const order = db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(on);
         if (!order) continue;
@@ -713,8 +726,11 @@ app.post('/api/import', uploadTemp.single('file'), (req, res) => {
             meeting = db.prepare('SELECT id FROM ccb_meetings WHERE meeting_name=?').get(meetingName);
             meetingCount++;
           }
+          const isProject = row['是否立项'] ? (String(row['是否立项']).trim() === '是' ? 1 : 0) : 0;
+          const projectCode = row['项目编号'] ? String(row['项目编号']).trim() : null;
+          const projectName = row['项目名称'] ? String(row['项目名称']).trim() : null;
           createdPoints.forEach(p => {
-            insS.run(meeting.id, order.id, p.id, p.system, p.version);
+            insS.run(meeting.id, order.id, p.id, p.system, p.version, isProject, projectCode, projectName);
             updP.run(p.system, p.version, p.id);
             scheduleCount++;
           });

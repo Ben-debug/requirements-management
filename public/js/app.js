@@ -792,6 +792,16 @@ async function batchScheduleSubOrder(orderId, batch) {
             <option value="">请选择版本</option>
           </select>
         </div>
+        <div>
+          <div style="font-size:12px;color:#999;margin-bottom:4px">立项</div>
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="bpi-cb" data-pid="${p.id}" onchange="toggleBatchProject(${p.id})"> 已立项
+          </label>
+          <div id="bpf-${p.id}" style="display:none;margin-top:4px">
+            <input type="text" id="bpc-${p.id}" placeholder="项目编号" style="width:100px;padding:3px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px;margin-right:4px">
+            <input type="text" id="bpn-${p.id}" placeholder="项目名称" style="width:120px;padding:3px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+          </div>
+        </div>
       </div>
     `;
     container.appendChild(div);
@@ -818,6 +828,11 @@ async function batchScheduleSubOrder(orderId, batch) {
   openModal('batch-schedule-modal');
 }
 
+function toggleBatchProject(pointId) {
+  const checked = document.querySelector(`.bpi-cb[data-pid="${pointId}"]`).checked;
+  document.getElementById('bpf-'+pointId).style.display = checked ? 'block' : 'none';
+}
+
 function orderNumDisplay() {
   return document.getElementById('detail-number-display')?.textContent || '';
 }
@@ -840,6 +855,10 @@ async function confirmBatchSchedule() {
   unscheduled.forEach(p => {
     const systems = getSelectedSystems('bps-'+p.id);
     const version = document.getElementById('bpv-'+p.id).value;
+    const bpiCb = document.querySelector(`.bpi-cb[data-pid="${p.id}"]`);
+    const isProject = bpiCb ? (bpiCb.checked ? 1 : 0) : 0;
+    const projectCode = document.getElementById('bpc-'+p.id)?.value?.trim() || null;
+    const projectName = document.getElementById('bpn-'+p.id)?.value?.trim() || null;
     if (!systems.length || !version) {
       skipped.push(`${p.point_number}（${!systems.length ? '缺系统' : ''}${!systems.length && !version ? '、' : ''}${!version ? '缺版本' : ''}）`);
       return;
@@ -848,7 +867,10 @@ async function confirmBatchSchedule() {
       order_id: orderId,
       point_id: p.id,
       system: systems.join(','),
-      version
+      version,
+      is_project: isProject,
+      project_code: projectCode,
+      project_name: projectName
     });
   });
 
@@ -870,6 +892,11 @@ async function confirmBatchSchedule() {
   } catch(e) { showToast(e.message,'error'); }
 }
 
+function toggleProjectFields(prefix) {
+  const checked = document.getElementById(prefix + '-schedule-is-project').checked;
+  document.getElementById(prefix + '-project-fields').style.display = checked ? 'block' : 'none';
+}
+
 async function showScheduleModal(pointId, orderId) {
   const [s, v, m] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings')]);
   const sys = s.data, vers = v.data, meetings = m.data;
@@ -886,7 +913,13 @@ async function confirmQuickSchedule() {
   const pointId = document.getElementById('schedule-point-id').value, orderId = document.getElementById('schedule-order-id').value;
   const meetingId = document.getElementById('detail-schedule-meeting').value, systems = getSelectedSystems(), version = document.getElementById('detail-schedule-version').value;
   if (!meetingId) { showToast('请选择CCB会议','error'); return; } if (!systems.length) { showToast('请至少选择一个系统','error'); return; } if (!version) { showToast('请选择版本','error'); return; }
-  try { const r = await fetch(`/api/meetings/${meetingId}/schedules`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:parseInt(orderId),point_id:parseInt(pointId),system:systems.join(','),version})}); const d = await r.json(); if (!d.success) throw new Error(d.message); showToast('排期成功','success'); closeModal('quick-schedule-modal'); viewOrder(parseInt(orderId)); } catch(e) { showToast(e.message,'error'); }
+  const isProject = document.getElementById('detail-schedule-is-project').checked ? 1 : 0;
+  const projectCode = document.getElementById('detail-project-code').value.trim() || null;
+  const projectName = document.getElementById('detail-project-name').value.trim() || null;
+  try {
+    const r = await fetch(`/api/meetings/${meetingId}/schedules`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:parseInt(orderId),point_id:parseInt(pointId),system:systems.join(','),version,is_project:isProject,project_code:projectCode,project_name:projectName})});
+    const d = await r.json(); if (!d.success) throw new Error(d.message); showToast('排期成功','success'); closeModal('quick-schedule-modal'); viewOrder(parseInt(orderId));
+  } catch(e) { showToast(e.message,'error'); }
 }
 
 // 【修复2】修改排期时预填当前值
@@ -914,7 +947,16 @@ async function openEditScheduleModal(scheduleId, orderId) {
   const currentSystems = currentSchedule ? currentSchedule.system.split(',').map(s=>s.trim()).filter(Boolean) : [];
   const currentVersion = currentSchedule ? currentSchedule.version : '';
   const currentMeetingId = currentSchedule ? currentSchedule.meeting_id : '';
-  
+  const currentIsProject = currentSchedule ? currentSchedule.is_project : 0;
+  const currentProjectCode = currentSchedule ? currentSchedule.project_code || '' : '';
+  const currentProjectName = currentSchedule ? currentSchedule.project_name || '' : '';
+
+  // Pre-fill project fields
+  document.getElementById('edit-schedule-is-project').checked = currentIsProject ? true : false;
+  document.getElementById('edit-project-code').value = currentProjectCode;
+  document.getElementById('edit-project-name').value = currentProjectName;
+  document.getElementById('edit-project-fields').style.display = currentIsProject ? 'block' : 'none';
+
   // Fill meeting dropdown
   const mtgSelect = document.getElementById('edit-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">不修改会议</option>';
@@ -935,7 +977,17 @@ async function confirmEditSchedule() {
   const scheduleId = document.getElementById('edit-schedule-id').value, meetingId = document.getElementById('edit-schedule-meeting').value;
   const systems = getSelectedSystems(), version = document.getElementById('edit-schedule-version').value;
   if (!systems.length) { showToast('请至少选择一个系统','error'); return; } if (!version) { showToast('请选择版本','error'); return; }
-  try { const body = {system:systems.join(','), version}; if (meetingId) body.meeting_id = parseInt(meetingId); await api(`/api/schedules/${scheduleId}`,{method:'PUT',body:JSON.stringify(body)}); showToast('排期已更新','success'); closeModal('edit-schedule-modal'); const oid = document.getElementById('detail-order-id')?.value; if (oid) viewOrder(parseInt(oid)); else viewMeeting(document.getElementById('schedule-meeting-id').value); } catch(e) { showToast(e.message,'error'); }
+  const isProject = document.getElementById('edit-schedule-is-project').checked ? 1 : 0;
+  const projectCode = document.getElementById('edit-project-code').value.trim() || null;
+  const projectName = document.getElementById('edit-project-name').value.trim() || null;
+  try {
+    const body = {system:systems.join(','), version, is_project:isProject, project_code:projectCode, project_name:projectName};
+    if (meetingId) body.meeting_id = parseInt(meetingId);
+    await api(`/api/schedules/${scheduleId}`,{method:'PUT',body:JSON.stringify(body)});
+    showToast('排期已更新','success'); closeModal('edit-schedule-modal');
+    const oid = document.getElementById('detail-order-id')?.value;
+    if (oid) viewOrder(parseInt(oid)); else viewMeeting(document.getElementById('schedule-meeting-id').value);
+  } catch(e) { showToast(e.message,'error'); }
 }
 
 async function deleteScheduleFromDetail(id) { if (!confirm('确定移除？')) return; try { await api(`/api/schedules/${id}`,{method:'DELETE'}); showToast('已移除','success'); viewOrder(document.getElementById('detail-order-id').value); } catch(e) {} }
@@ -1137,7 +1189,8 @@ function renderMeetingSchedules(schedules) {
     }
     g.items.forEach(s => {
       const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
-      html += `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}</div><div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span></div></div>`;
+      const projTag = s.is_project ? `<span class="sched-tag">📋 ${esc(s.project_code||'')} ${esc(s.project_name||'')}</span>` : '';
+      html += `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}</div><div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag}</div></div>`;
     });
   });
   c.innerHTML = html;
@@ -1192,7 +1245,8 @@ function renderScheduleResults(result) {
   function schedCard(s) {
     const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
     const batchTag = s.sub_batch ? ` <span style="font-size:11px;color:#1890ff;background:#f0f5ff;padding:1px 6px;border-radius:3px">${esc(s.order_number)}-${esc(s.sub_batch)}</span>` : '';
-    return `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}${batchTag}</div><div class="sched-meta">${esc(s.meeting_name)} (${s.meeting_date})</div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-meta">部门: ${esc(s.department||'-')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span></div></div>`;
+    const projTag2 = s.is_project ? `<span class="sched-tag">📋 ${esc(s.project_code||'')} ${esc(s.project_name||'')}</span>` : '';
+    return `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}${batchTag}</div><div class="sched-meta">${esc(s.meeting_name)} (${s.meeting_date})</div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-meta">部门: ${esc(s.department||'-')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag2}</div></div>`;
   }
   if (grouped) {
     let html = ''; Object.keys(grouped).sort().forEach(key => { const items = grouped[key]; html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`; html += items.map(s => schedCard(s)).join(''); }); c.innerHTML = html;

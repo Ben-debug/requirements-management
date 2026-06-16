@@ -119,6 +119,9 @@ function initDatabase() {
   try { db.exec("ALTER TABLE requirement_points ADD COLUMN sub_batch TEXT"); } catch(e) {}
   try { db.exec("ALTER TABLE flow_files ADD COLUMN sub_batch TEXT"); } catch(e) {}
   try { db.exec("ALTER TABLE requirement_orders ADD COLUMN background TEXT"); } catch(e) {}
+  try { db.exec("ALTER TABLE ccb_schedules ADD COLUMN is_project INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.exec("ALTER TABLE ccb_schedules ADD COLUMN project_code TEXT"); } catch(e) {}
+  try { db.exec("ALTER TABLE ccb_schedules ADD COLUMN project_name TEXT"); } catch(e) {}
 }
 
 module.exports = { getDatabase, initDataDir, reopenDatabase };

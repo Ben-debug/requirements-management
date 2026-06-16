@@ -21,13 +21,25 @@ const customDataDir = config.getPath('data_dir');
 if (customDataDir) {
   initDataDir(customDataDir);
   if (!fs.existsSync(customDataDir)) fs.mkdirSync(customDataDir, { recursive: true });
+  // 自动迁移旧 config.json 到新路径
+  const oldCfg = path.join(ROOT_DIR, 'data', 'config.json');
+  const newCfg = path.join(customDataDir, 'config.json');
+  if (!fs.existsSync(newCfg) && fs.existsSync(oldCfg)) {
+    try {
+      fs.copyFileSync(oldCfg, newCfg);
+      console.log(`已迁移配置到: ${customDataDir}`);
+    } catch (e) {
+      console.error(`配置迁移失败: ${e.message}`);
+    }
+  }
+  // 切换配置模块到新目录（后续读写都走新路径）
+  config.setConfigDir(customDataDir);
   // 自动迁移旧数据库到新路径
   const oldDb = path.join(ROOT_DIR, 'data', 'requirements.db');
   const newDb = path.join(customDataDir, 'requirements.db');
   if (!fs.existsSync(newDb) && fs.existsSync(oldDb)) {
     try {
       fs.copyFileSync(oldDb, newDb);
-      // 迁移 WAL/SHM 日志文件
       for (const ext of ['-wal', '-shm']) {
         const f = oldDb + ext;
         if (fs.existsSync(f)) fs.copyFileSync(f, newDb + ext);
@@ -765,13 +777,23 @@ app.get('/api/config/paths', (req, res) => {
 app.post('/api/config/paths', (req, res) => {
   try {
     const { data_dir, flow_files_dir, meeting_files_dir } = req.body || {};
-    if (data_dir !== undefined) config.setPath('data_dir', data_dir);
+    if (data_dir !== undefined) {
+      config.setPath('data_dir', data_dir);
+      // 新目录写一份 config.json，使用户能在新路径看到配置文件
+      if (data_dir) {
+        if (!fs.existsSync(data_dir)) fs.mkdirSync(data_dir, { recursive: true });
+        const newCfg = path.join(data_dir, 'config.json');
+        if (!fs.existsSync(newCfg)) {
+          fs.writeFileSync(newCfg, JSON.stringify(config.getAll(), null, 2), 'utf-8');
+        }
+      }
+    }
     if (flow_files_dir !== undefined) config.setPath('flow_files_dir', flow_files_dir);
     if (meeting_files_dir !== undefined) config.setPath('meeting_files_dir', meeting_files_dir);
     // 确保新目录存在
     if (flow_files_dir && !fs.existsSync(flow_files_dir)) fs.mkdirSync(flow_files_dir, { recursive: true });
     if (meeting_files_dir && !fs.existsSync(meeting_files_dir)) fs.mkdirSync(meeting_files_dir, { recursive: true });
-    res.json({ success: true, message: '路径设置已保存，部分修改需重启服务后生效' });
+    res.json({ success: true, message: '路径设置已保存。文件目录立即生效，data目录变更需重启服务生效（重启后自动迁移旧数据）' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

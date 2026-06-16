@@ -1,33 +1,33 @@
 const fs = require('fs');
 const path = require('path');
 
-let DATA_DIR;
-if (process.pkg) {
-  DATA_DIR = path.join(path.dirname(process.execPath), 'data');
-} else {
-  DATA_DIR = path.join(__dirname, '..', 'data');
-}
-
-const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-let configCache = null;
-let configDirty = false;
-
 const defaults = {
   department: ['交易中心', '清算部', '交割储运部'],
   version: ['2026年端午版本', '2026年国庆版本', '2027年元旦版本'],
   system: ['业务服务平台', '会员服务平台', '竞价交易系统', '清算系统'],
   file_type: ['需求服务单', '需求意向书及评估表', '项目需求书'],
-  paths: {
-    data_dir: '',
-    flow_files_dir: '',
-    meeting_files_dir: ''
-  }
+  paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '' }
 };
 
+// 默认配置目录：项目 data/ 或 exe 同级 data/
+let configDir;
+if (process.pkg) {
+  configDir = path.join(path.dirname(process.execPath), 'data');
+} else {
+  configDir = path.join(__dirname, '..', 'data');
+}
+
+let configCache = null;
+
+function configPath() {
+  return path.join(configDir, 'config.json');
+}
+
 function ensureDefaults() {
-  if (!fs.existsSync(CONFIG_PATH)) {
+  const cp = configPath();
+  if (!fs.existsSync(cp)) {
     const data = structuredClone(defaults);
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFileSync(cp, JSON.stringify(data, null, 2), 'utf-8');
     configCache = data;
   }
 }
@@ -35,10 +35,10 @@ function ensureDefaults() {
 function load() {
   if (configCache) return configCache;
   ensureDefaults();
+  const cp = configPath();
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    const raw = fs.readFileSync(cp, 'utf-8');
     configCache = JSON.parse(raw);
-    // Merge missing categories with defaults
     let changed = false;
     for (const [cat, items] of Object.entries(defaults)) {
       if (!configCache[cat]) {
@@ -56,12 +56,12 @@ function load() {
 
 function save() {
   if (!configCache) return;
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(configCache, null, 2), 'utf-8');
+  fs.writeFileSync(configPath(), JSON.stringify(configCache, null, 2), 'utf-8');
 }
 
-function getAll() {
-  return load();
-}
+// ---- 公开 API ----
+
+function getAll() { return load(); }
 
 function getCategory(cat) {
   const data = load();
@@ -101,4 +101,11 @@ function setPath(name, value) {
   return true;
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load };
+/** 切换 config.json 的存放目录（配合自定义 data_dir），清空缓存 */
+function setConfigDir(dir) {
+  if (!dir || dir === configDir) return;
+  configDir = dir;
+  configCache = null;  // 强制下次 load() 重新读取新路径
+}
+
+module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load, setConfigDir };

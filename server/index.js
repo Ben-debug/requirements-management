@@ -21,6 +21,22 @@ const customDataDir = config.getPath('data_dir');
 if (customDataDir) {
   initDataDir(customDataDir);
   if (!fs.existsSync(customDataDir)) fs.mkdirSync(customDataDir, { recursive: true });
+  // 自动迁移旧数据库到新路径
+  const oldDb = path.join(ROOT_DIR, 'data', 'requirements.db');
+  const newDb = path.join(customDataDir, 'requirements.db');
+  if (!fs.existsSync(newDb) && fs.existsSync(oldDb)) {
+    try {
+      fs.copyFileSync(oldDb, newDb);
+      // 迁移 WAL/SHM 日志文件
+      for (const ext of ['-wal', '-shm']) {
+        const f = oldDb + ext;
+        if (fs.existsSync(f)) fs.copyFileSync(f, newDb + ext);
+      }
+      console.log(`已迁移数据库到: ${customDataDir}`);
+    } catch (e) {
+      console.error(`数据库迁移失败: ${e.message}`);
+    }
+  }
 }
 app.use(express.static(path.join(ROOT_DIR, 'public'), { maxAge: 0, etag: false }));
 

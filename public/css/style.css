@@ -213,3 +213,27 @@ textarea.form-control{min-height:80px;resize:vertical}
 .btn-group .btn:first-child{border-radius:6px 0 0 6px}
 .btn-group .btn:last-child{border-radius:0 6px 6px 0;border-left:none}
 .filter-sep{width:1px;height:20px;background:#e8e8e8;display:inline-block;margin:0 2px}
+
+/* 需求点描述展开/收起 */
+.point-desc-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.point-desc-clamped:hover {
+  color: #1890ff;
+}
+.desc-toggle-btn {
+  font-size: 12px;
+  color: #1890ff;
+  cursor: pointer;
+  user-select: none;
+  margin-top: 2px;
+  display: inline-block;
+}
+.desc-toggle-btn:hover {
+  color: #40a9ff;
+  text-decoration: underline;
+}

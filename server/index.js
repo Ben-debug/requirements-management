@@ -186,6 +186,77 @@ app.get('/api/orders/:id', (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ---- 文件自动扫描（根据配置的路径检索已有文件） ----
+// 扫描流转文件目录，自动检出并关联未入库的文件
+app.get('/api/orders/:id/scan-files', (req, res) => {
+  try {
+    const db = getDatabase();
+    const orderId = parseInt(req.params.id);
+    const order = db.prepare('SELECT id, order_number FROM requirement_orders WHERE id=?').get(orderId);
+    if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
+    const flowDir = getFlowFileDir();
+    if (!fs.existsSync(flowDir)) return res.json({ success: true, data: [], count: 0 });
+    // 已有文件的路径集合
+    const existing = new Set(
+      db.prepare('SELECT file_path FROM flow_files WHERE order_id=?').all(orderId).map(r => path.resolve(r.file_path))
+    );
+    const files = fs.readdirSync(flowDir).filter(f => fs.statSync(path.join(flowDir, f)).isFile());
+    const discovered = [];
+    const prefix = `${orderId}-`;
+    for (const file of files) {
+      const filePath = path.resolve(path.join(flowDir, file));
+      if (existing.has(filePath)) continue;
+      if (!file.startsWith(prefix)) continue; // 必须匹配订单ID前缀
+      const typeMatch = file.match(/【([^】]+)】/);
+      const fileType = typeMatch ? typeMatch[1] : '未知';
+      discovered.push({ original_name: file, stored_name: file, file_path: filePath, file_type: fileType });
+    }
+    // 自动关联
+    let count = 0;
+    if (discovered.length) {
+      const ins = db.prepare('INSERT OR IGNORE INTO flow_files (order_id, file_type, original_name, file_path, stored_name) VALUES (?,?,?,?,?)');
+      db.transaction(() => {
+        for (const f of discovered) {
+          ins.run(orderId, f.file_type, f.original_name, f.file_path, f.stored_name);
+          count++;
+        }
+      })();
+    }
+    res.json({ success: true, data: discovered, count });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// 扫描会议纪要目录，自动检出未关联的纪要文件
+app.get('/api/meetings/:id/scan-files', (req, res) => {
+  try {
+    const db = getDatabase();
+    const meetingId = parseInt(req.params.id);
+    const meeting = db.prepare('SELECT id, meeting_name, file_name, file_path FROM ccb_meetings WHERE id=?').get(meetingId);
+    if (!meeting) return res.status(404).json({ success: false, message: '会议不存在' });
+    const meetingDir = getMeetingFileDir();
+    if (!fs.existsSync(meetingDir)) return res.json({ success: true, data: [], count: 0 });
+    const files = fs.readdirSync(meetingDir).filter(f => fs.statSync(path.join(meetingDir, f)).isFile());
+    const discovered = [];
+    for (const file of files) {
+      const filePath = path.resolve(path.join(meetingDir, file));
+      if (meeting.file_path && path.resolve(meeting.file_path) === filePath) continue;
+      // 匹配会议纪要文件：包含【会议纪要】且包含会议名称
+      if (file.includes('【会议纪要】') && file.includes(meeting.meeting_name)) {
+        discovered.push({ file_name: file, file_path: filePath });
+      }
+    }
+    // 自动关联第一个匹配的文件（如果会议尚未关联纪要文件）
+    let linked = null;
+    if (discovered.length && !meeting.file_name) {
+      const best = discovered[0];
+      db.prepare('UPDATE ccb_meetings SET file_name=?, file_path=? WHERE id=?')
+        .run(best.file_name, best.file_path, meetingId);
+      linked = best;
+    }
+    res.json({ success: true, data: discovered, linked, count: discovered.length });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.get('/api/orders/check/:orderNumber', (req, res) => {
   try { const db = getDatabase(); res.json({ success: true, exists: !!db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(req.params.orderNumber) }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }

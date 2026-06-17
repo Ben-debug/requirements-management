@@ -81,9 +81,13 @@ function showResultModal(options) {
 }
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  // 关闭详情弹窗时刷新需求单列表（排期一览信息可能已变更）
+  if (id === 'detail-modal') loadOrders();
+}
 document.querySelectorAll('.modal-overlay').forEach(el => {
-  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+  el.addEventListener('click', e => { if (e.target === el) { el.classList.remove('open'); if (el.id === 'detail-modal') loadOrders(); } });
 });
 
 async function loadDropdowns() {
@@ -256,6 +260,7 @@ async function loadOrders() {
       var schedCount = (o.schedule_summary||{}).scheduled || 0, totalPoints = (o.schedule_summary||{}).total || 0;
 	      var projCount = (o.schedule_summary||{}).project_count || 0;
       var schedHtml = '';
+      var projHtml = projCount ? '<span class="badge badge-orange" style="margin-left:4px">📋 立项</span>' : '';
       if (totalPoints === 0) {
         schedHtml = '<span style="font-size:12px;color:#999">—</span>';
       } else if (schedCount === totalPoints) {
@@ -264,7 +269,6 @@ async function loadOrders() {
         schedHtml = '<span style="font-size:12px;color:#fa8c16;font-weight:500">⏳ ' + schedCount + '/' + totalPoints + '</span>';
       } else {
         schedHtml = '<span style="font-size:12px;color:#ff4d4f;font-weight:500">⏳ 0/' + totalPoints + '</span>';
-      var projHtml = projCount ? '<span class="badge badge-orange" style="margin-left:4px">📋 立项</span>' : '';
       }
       return `<tr>
       <td><a href="javascript:void(0)" onclick="window.viewOrder(${o.id})" style="color:#1890ff;font-weight:600;text-decoration:underline">${o.order_number}</a></td>
@@ -279,8 +283,18 @@ async function loadOrders() {
     
     if (r.grouped) {
       // 分组展示（可折叠，无分页）
+      // 按配置中的部门排序（已排序部门在前，未配置的按字母排在后）
+      const deptOrder = r.filters?.departments || [];
+      const sortKeys = Object.keys(r.grouped).sort((a, b) => {
+        const ia = deptOrder.indexOf(a);
+        const ib = deptOrder.indexOf(b);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.localeCompare(b, 'zh-CN');
+      });
       let html = '';
-      Object.keys(r.grouped).sort().forEach(key => {
+      sortKeys.forEach(key => {
         html += `<tr class="group-header" onclick="toggleOrderGroup(this)" data-collapsed="false"><td colspan="9" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff;background:#e6f7ff;cursor:pointer;user-select:none">📁 ${esc(key)}（${r.grouped[key].length}条） <span class="group-arrow" style="float:right;margin-right:8px">▼</span></td></tr>`;
         r.grouped[key].forEach(o => { html += orderRow(o); });
       });
@@ -637,9 +651,24 @@ async function viewOrder(id) {
     }
     
     await loadDropdowns(); renderDetailPoints(o.points||[]); renderFiles(o.files||[]); openModal('detail-modal');
+    // 自动扫描文件目录中的已有文件
+    scanAndLinkOrderFiles(id);
   } catch(e) {
     console.error(e);
   }
+}
+
+/** 扫描流转文件目录，自动关联已有的未入库文件 */
+async function scanAndLinkOrderFiles(orderId) {
+  try {
+    const r = await fetch(`/api/orders/${orderId}/scan-files`);
+    const d = await r.json();
+    if (!d.success) return;
+    if (d.count > 0) {
+      showToast(`已自动关联 ${d.count} 个流转文件`,'success');
+      viewOrder(orderId); // 刷新显示
+    }
+  } catch(e) { /* 静默 */ }
 }
 
 function renderDetailPoints(points) {
@@ -741,10 +770,13 @@ function renderPointItem(p, oid) {
   const has = p.schedule_system || p.schedule_id;
   const systems = p.schedule_system ? p.schedule_system.split(',').filter(Boolean) : [];
   const tag = p.sub_batch ? `<span style="display:inline-block;font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px;margin-left:6px;font-weight:400">子单 ${p.sub_batch}</span>` : '';
+  const descId = `pd-${p.id}`;
+  const isLong = p.description && p.description.length > 80;
   return `<div class="point-item">
     <div class="point-info">
       <div class="point-number">${esc(p.point_number)}${tag}</div>
-      <div class="point-desc">${esc(p.description)}</div>
+      <div id="${descId}" class="point-desc ${isLong ? 'point-desc-clamped' : ''}" onclick="${isLong ? `togglePointDesc('${descId}')` : ''}">${esc(p.description).replace(/\n/g, '<br>')}</div>
+      ${isLong ? `<span class="desc-toggle-btn" onclick="togglePointDesc('${descId}')">展开全文 ▼</span>` : ''}
       <div class="point-meta">${has ? `<span style="color:#52c41a">✅ ${systems.map(s=>esc(s.trim())).join(', ')} | ${esc(p.schedule_version)}</span>` : '<span style="color:#fa8c16">⏳ 待排期</span>'}
       ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}</div>
     </div>
@@ -755,6 +787,20 @@ function renderPointItem(p, oid) {
       <button class="btn btn-sm btn-danger" onclick="deletePoint(${p.id})">删除</button>
     </div>
   </div>`;
+}
+
+function togglePointDesc(descId) {
+  const el = document.getElementById(descId);
+  if (!el) return;
+  const isClamped = el.classList.contains('point-desc-clamped');
+  const btn = el.parentElement.querySelector('.desc-toggle-btn');
+  if (isClamped) {
+    el.classList.remove('point-desc-clamped');
+    if (btn) btn.textContent = '收起 ▲';
+  } else {
+    el.classList.add('point-desc-clamped');
+    if (btn) btn.textContent = '展开全文 ▼';
+  }
 }
 
 async function batchScheduleSubOrder(orderId, batch) {
@@ -781,7 +827,7 @@ async function batchScheduleSubOrder(orderId, batch) {
     div.style.cssText = 'padding:10px;margin-bottom:6px;background:#fafafa;border-radius:6px;border-left:3px solid #1890ff';
     div.innerHTML = `
       <div style="font-weight:600;font-size:13px;color:#333;margin-bottom:8px">
-        ${esc(p.point_number)} ${esc(p.description)}
+        ${esc(p.point_number)} ${esc(p.description).replace(/\n/g, '<br>')}
       </div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
         <div>
@@ -1028,18 +1074,109 @@ async function deleteFile(id) { if (!confirm('确定删除？')) return; try { a
 async function loadMeetings() {
   try { const meetings = (await api('/api/meetings')).data; const c = document.getElementById('meetings-list'); if (!meetings.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无CCB会议</p></div>'; return; } c.innerHTML = meetings.map(m => `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(m.meeting_name)}</div><div class="action-group"><button class="btn btn-sm" onclick="viewMeeting(${m.id})">排期管理</button><button class="btn btn-sm" onclick="editMeeting(${m.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteMeeting(${m.id})">删除</button></div></div><div class="sched-meta">日期: ${m.meeting_date}${m.notes?' | '+esc(m.notes):''}</div>${m.file_name?'<div class="sched-tags"><span class="sched-tag">📎 <a href="/api/meetings/'+m.id+'/file/download" style="color:#333;text-decoration:none" target="_blank" title="下载纪要文件">'+esc(m.file_name)+'</a></span></div>':''}</div>`).join(''); } catch(e) {}
 }
-document.getElementById('meeting-form')?.addEventListener('submit', async e => { e.preventDefault(); const data = Object.fromEntries(new FormData(e.target)); try { if (state.editingMeetingId) { await api(`/api/meetings/${state.editingMeetingId}`,{method:'PUT',body:JSON.stringify(data)}); showToast('已更新','success'); } else { await api('/api/meetings',{method:'POST',body:JSON.stringify(data)}); showToast('已创建','success'); } closeModal('meeting-modal'); e.target.reset(); state.editingMeetingId = null; loadMeetings(); } catch(e) {} });
-function showCreateMeeting() { state.editingMeetingId = null; document.getElementById('meeting-modal-title').textContent = '新建CCB会议'; document.getElementById('meeting-form').reset(); openModal('meeting-modal'); }
-async function editMeeting(id) { state.editingMeetingId = id; const d = (await api(`/api/meetings/${id}`)).data; document.getElementById('meeting-modal-title').textContent = '编辑CCB会议'; document.getElementById('meeting_name').value = d.meeting_name; document.getElementById('meeting_date').value = d.meeting_date; document.getElementById('meeting_notes').value = d.notes||''; openModal('meeting-modal'); }
+document.getElementById('meeting-form')?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  try {
+    if (state.editingMeetingId) {
+      await api(`/api/meetings/${state.editingMeetingId}`,{method:'PUT',body:JSON.stringify(data)});
+      showToast('已更新','success');
+      closeModal('meeting-modal');
+    } else {
+      const resp = await api('/api/meetings',{method:'POST',body:JSON.stringify(data)});
+      // 保存后保持弹窗打开，允许上传文件
+      const newId = resp.data.id;
+      state.editingMeetingId = newId;
+      document.getElementById('meeting-id').value = newId;
+      document.getElementById('meeting-modal-title').textContent = '编辑CCB会议';
+      showToast('已创建，可继续上传纪要文件','success');
+    }
+    loadMeetings();
+  } catch(e) { showToast(e.message,'error'); }
+});
+function showCreateMeeting() {
+  state.editingMeetingId = null;
+  document.getElementById('meeting-modal-title').textContent = '新建CCB会议';
+  document.getElementById('meeting-form').reset();
+  document.getElementById('meeting-id').value = '';
+  document.getElementById('meeting-current-file').style.display = 'none';
+  document.getElementById('meeting-current-file').innerHTML = '';
+  openModal('meeting-modal');
+}
+async function editMeeting(id) {
+  state.editingMeetingId = id;
+  const d = (await api(`/api/meetings/${id}`)).data;
+  document.getElementById('meeting-modal-title').textContent = '编辑CCB会议';
+  document.getElementById('meeting_name').value = d.meeting_name;
+  document.getElementById('meeting_date').value = d.meeting_date;
+  document.getElementById('meeting_notes').value = d.notes||'';
+  document.getElementById('meeting-id').value = id;
+  openModal('meeting-modal');
+  // 异步加载文件显示
+  refreshMeetingFileDisplay(id);
+}
 async function deleteMeeting(id) { if (!confirm('确定删除？')) return; try { await api(`/api/meetings/${id}`,{method:'DELETE'}); showToast('已删除','success'); loadMeetings(); } catch(e) {} }
-async function uploadMeetingFile() { const mid = state.editingMeetingId || document.getElementById('schedule-meeting-id')?.value; if (!mid) { showToast('请先选择会议','error'); return; } const fi = document.getElementById('meeting-file-upload'); if (!fi.files.length) { showToast('请选择文件','error'); return; } const fd = new FormData(); fd.append('file',fi.files[0]); try { const r = await fetch(`/api/meetings/${mid}/file`,{method:'POST',body:fd}); const d = await r.json(); if (!d.success) throw new Error(d.message); showToast('上传成功','success'); fi.value=''; loadMeetings(); } catch(e) { showToast(e.message,'error'); } }
+async function uploadMeetingFile() {
+  const mid = document.getElementById('meeting-id')?.value || state.editingMeetingId || document.getElementById('schedule-meeting-id')?.value;
+  if (!mid) { showToast('请先保存会议，再上传文件','error'); return; }
+  const fi = document.getElementById('meeting-file-upload');
+  if (!fi.files.length) { showToast('请选择文件','error'); return; }
+  const fd = new FormData(); fd.append('file',fi.files[0]);
+  // 如果是从编辑弹窗上传，确保 state.editingMeetingId 有值
+  if (!state.editingMeetingId) state.editingMeetingId = parseInt(mid);
+  try {
+    const r = await fetch(`/api/meetings/${mid}/file`,{method:'POST',body:fd});
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    showToast('上传成功','success');
+    fi.value='';
+    // 刷新文件显示
+    refreshMeetingFileDisplay(mid);
+    loadMeetings();
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+/** 刷新会议编辑弹窗中的文件显示 */
+async function refreshMeetingFileDisplay(meetingId) {
+  const container = document.getElementById('meeting-current-file');
+  if (!container) return;
+  try {
+    const d = await api(`/api/meetings/${meetingId}`);
+    const data = d.data;
+    if (data.file_name) {
+      container.style.display = 'block';
+      container.innerHTML = `📎 当前文件：<a href="/api/meetings/${meetingId}/file/download" target="_blank" style="color:#1890ff;font-weight:500">${esc(data.file_name)}</a>`;
+    } else {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
+  } catch(e) {
+    container.style.display = 'none';
+  }
+}
 
 // ---- Batch Schedule ----
 async function viewMeeting(id) {
   const d = (await api(`/api/meetings/${id}`)).data;
   document.getElementById('schedule-meeting-id').value = id; document.getElementById('schedule-meeting-name').textContent = d.meeting_name; document.getElementById('schedule-meeting-name-display').textContent = d.meeting_name; document.getElementById('schedule-meeting-date').textContent = d.meeting_date; document.getElementById('schedule-meeting-notes').textContent = d.notes||'-'; document.getElementById('schedule-meeting-file').textContent = d.file_name||'无';
   renderMeetingSchedules(d.schedules||[]); await loadDropdowns(); await loadBatchScheduleTable(); openModal('schedule-modal');
+  // 自动扫描会议纪要目录
+  scanAndLinkMeetingFiles(id);
 }
+
+/** 扫描会议纪要目录，自动关联已有的未入库文件 */
+async function scanAndLinkMeetingFiles(meetingId) {
+  try {
+    const r = await fetch(`/api/meetings/${meetingId}/scan-files`);
+    const d = await r.json();
+    if (!d.success) return;
+    if (d.linked) {
+      showToast('已自动关联会议纪要文件','success');
+      document.getElementById('schedule-meeting-file').textContent = d.linked.file_name;
+    }
+  } catch(e) { /* 静默 */ }
+}
+
 async function loadBatchScheduleTable() {
   const c = document.getElementById('schedule-batch-table');
   try {
@@ -1163,7 +1300,7 @@ function renderMeetingSchedules(schedules) {
     g.items.forEach(s => {
       const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
       const projTag = s.is_project ? '<span class="sched-tag">📋 已立项</span>' : '';
-      html += `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}</div><div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag}</div></div>`;
+      html += `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}</div><div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div></div><div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag}</div></div>`;
     });
   });
   c.innerHTML = html;
@@ -1219,7 +1356,7 @@ function renderScheduleResults(result) {
     const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
     const batchTag = s.sub_batch ? ` <span style="font-size:11px;color:#1890ff;background:#f0f5ff;padding:1px 6px;border-radius:3px">${esc(s.order_number)}-${esc(s.sub_batch)}</span>` : '';
     const projTag2 = s.is_project ? '<span class="sched-tag">📋 已立项</span>' : '';
-    return `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}${batchTag}</div><div class="sched-meta">${esc(s.meeting_name)} (${s.meeting_date})</div></div><div class="sched-meta">${esc(s.point_description)}</div><div class="sched-meta">部门: ${esc(s.department||'-')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag2}</div></div>`;
+    return `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}${batchTag}</div><div class="sched-meta">${esc(s.meeting_name)} (${s.meeting_date})</div></div><div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div><div class="sched-meta">部门: ${esc(s.department||'-')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag2}</div></div>`;
   }
   if (grouped) {
     let html = ''; Object.keys(grouped).sort().forEach(key => { const items = grouped[key]; html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`; html += items.map(s => schedCard(s)).join(''); }); c.innerHTML = html;

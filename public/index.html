@@ -319,7 +319,8 @@
     <div class="form-row"><div class="form-group"><label>会议名称 <span class="required">*</span></label><input type="text" id="meeting_name" name="meeting_name" class="form-control" required></div>
     <div class="form-group"><label>日期 <span class="required">*</span></label><input type="date" id="meeting_date" name="meeting_date" class="form-control" required></div></div>
     <div class="form-group"><label>备注</label><textarea id="meeting_notes" name="notes" class="form-control"></textarea></div>
-    <div class="form-group"><label>纪要文件</label><div class="form-row"><input type="file" id="meeting-file-upload" class="form-control"><button type="button" class="btn btn-primary" onclick="uploadMeetingFile()" title="上传CCB会议纪要文件。文件名将以【会议纪要】开头自动规范命名">上传</button></div></div>
+    <div class="form-group"><label>纪要文件</label><div id="meeting-current-file" style="display:none;margin-bottom:8px;padding:8px 12px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:13px"></div><div class="form-row"><input type="file" id="meeting-file-upload" class="form-control"><button type="button" class="btn btn-primary" onclick="uploadMeetingFile()" title="上传CCB会议纪要文件。文件名将以【会议纪要】开头自动规范命名">上传</button></div></div>
+    <input type="hidden" id="meeting-id" value="">
   </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('meeting-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
 </div></div>
 

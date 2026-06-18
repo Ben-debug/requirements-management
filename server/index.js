@@ -246,19 +246,30 @@ app.get('/api/orders/:id/scan-files', (req, res) => {
     for (const filePath of allFiles) {
       if (existing.has(path.resolve(filePath))) continue;
       const fileName = path.basename(filePath);
-      // 匹配文件命名格式: 【类型】order_number-名称.扩展名
-      // 示例：【需求服务单】A01-需求名称.pdf
+      const ext = path.extname(fileName).toLowerCase();
+      let fileType, matchStr;
+
       const bracketEnd = fileName.indexOf('】');
-      if (bracketEnd === -1) continue;
-      const afterBracket = fileName.substring(bracketEnd + 1);
-      if (!afterBracket.startsWith(orderNum)) continue;
-      const typeMatch = fileName.match(/【([^】]+)】/);
-      const fileType = typeMatch ? typeMatch[1] : '未知';
+      if (bracketEnd !== -1) {
+        // 【类型】order_number-名称.ext 格式
+        matchStr = fileName.substring(bracketEnd + 1);
+        if (!matchStr.startsWith(orderNum)) continue;
+        const typeMatch = fileName.match(/【([^】]+)】/);
+        fileType = typeMatch ? typeMatch[1] : '未知';
+      } else if (ext === '.pdf') {
+        // PDF 文件：无【类型】前缀也按文件名开头匹配
+        const nameWithoutExt = path.basename(fileName, ext);
+        if (!nameWithoutExt.startsWith(orderNum)) continue;
+        matchStr = nameWithoutExt;
+        fileType = '需求服务单';
+      } else {
+        continue;
+      }
 
       // 尝试从文件名中提取子单号
       // 格式: orderNum-{subBatch}-描述.ext  如 A01-1-功能设计.docx
       let subBatch = null;
-      const restAfterOrder = afterBracket.substring(orderNum.length);
+      const restAfterOrder = matchStr.substring(orderNum.length);
       const subBatchMatch = restAfterOrder.match(/^-(\d+)-\s*/);
       if (subBatchMatch) {
         const extracted = subBatchMatch[1];

@@ -52,9 +52,14 @@
     <input type="date" id="filter-date-from" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
     <span style="color:#999;font-size:12px">~</span>
     <input type="date" id="filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
+    <select id="filter-is-project" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
+      <option value="">全部状态</option>
+      <option value="1">📋 已立项</option>
+      <option value="0">未立项</option>
+    </select>
     <button class="btn btn-primary" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
     <button class="btn" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
-    <span class="filter-sep"></span>
+    <span class="filter-sep" style="margin-left:auto"></span>
     <span style="font-size:12px;color:#999">排序</span>
     <select id="filter-sort" onchange="onFilterChange()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
       <option value="created_at">创建时间</option>
@@ -142,13 +147,9 @@
     <button class="btn btn-sm btn-primary" onclick="applyFileFilter()">🔍 查询</button>
     <button class="btn btn-sm" onclick="resetFileFilter()">↻ 重置</button>
   </div>
-  <div class="table-container">
-    <table id="files-table">
-      <thead><tr>
-        <th style="width:40%">文件名</th><th>类型</th><th>所属需求单</th><th>提出部门</th><th>子单</th><th>操作</th>
-      </tr></thead>
-      <tbody><tr><td colspan="6"><div class="loading">加载中...</div></td></tr></tbody>
-    </table>
+  <div class="file-group-container" id="files-container">
+    <div id="files-empty-state" style="display:none"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></div>
+    <div id="files-groups"></div>
     <div id="files-pagination" class="pagination"></div>
   </div>
 </div>
@@ -216,6 +217,14 @@
 	          </div>
 	          <div class="form-hint">CCB会议纪要文件</div>
 	        </div>
+	        <div class="form-group">
+	          <label>需求服务单目录</label>
+	          <div style="display:flex;gap:8px">
+	            <input type="text" id="path-service-order" class="form-control" placeholder="public/uploads/service_orders/" onchange="onPathChange()" readonly style="background:#fafafa;cursor:pointer" onclick="openFolderPicker('path-service-order')">
+	            <button type="button" class="btn btn-sm" onclick="openFolderPicker('path-service-order')" title="浏览并选择需求服务单文件的存储目录（自动递归扫描）">📁 选择</button>
+	          </div>
+	          <div class="form-hint">需求服务单相关文件（可含子目录，系统自动递归扫描匹配）</div>
+	        </div>
 	        <button class="btn btn-primary" onclick="savePaths()" title="保存路径设置。修改 data 目录需重启服务生效，文件目录修改立即生效">保存路径设置</button>
 	      </div>
     </div>
@@ -245,7 +254,7 @@
 <div id="detail-modal" class="modal-overlay"><div class="modal modal-lg">
   <div class="modal-header"><h3>需求单详情 - <span id="detail-number"></span></h3><button class="modal-close" onclick="closeModal('detail-modal')">×</button></div>
   <div class="modal-body">
-    <div class="detail-section"><h4>基本信息</h4>
+    <div class="detail-section"><h4>基本信息 <button class="btn btn-sm" onclick="editOrder(document.getElementById('detail-order-id').value)" style="margin-left:12px;font-size:12px;padding:2px 10px">✏️ 编辑</button></h4>
       <div class="detail-grid">
         <div class="detail-item"><div class="label">编号</div><div class="value" id="detail-number-display"></div></div>
         <div class="detail-item"><div class="label">名称</div><div class="value" id="detail-name"></div></div>
@@ -406,11 +415,11 @@
 
 <footer class="app-footer">
   <div class="footer-content">
-    <span>需求单信息管理系统 v1.3.0</span>
+    <span>需求单信息管理系统 v1.8.0</span>
     <span>创作者：Yu by AI</span>
-    <span>发布日期：2026-06-12</span>
+    <span>发布日期：2026-06-18</span>
   </div>
 </footer>
-<script src="/js/app.js?v=1.3.3"></script>
+<script src="/js/app.js?v=1.8.0"></script>
 </body>
 </html>

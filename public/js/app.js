@@ -82,9 +82,19 @@ function showResultModal(options) {
   openModal('result-modal');
 }
 
-function openModal(id) { document.getElementById(id).classList.add('open'); }
+function openModal(id) {
+  const el = document.getElementById(id);
+  el.classList.add('open');
+  // 弹窗叠层：如果已有其他弹窗打开，提升新弹窗的层级
+  const openModals = document.querySelectorAll('.modal-overlay.open');
+  if (openModals.length > 1) {
+    el.style.zIndex = 1000 + openModals.length;
+  }
+}
 function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
+  const el = document.getElementById(id);
+  el.classList.remove('open');
+  el.style.zIndex = ''; // 重置层级
   // 关闭详情弹窗时刷新需求单列表（排期一览信息可能已变更）
   if (id === 'detail-modal') loadOrders();
 }
@@ -187,9 +197,11 @@ async function loadPaths() {
     document.getElementById('path-data-dir').value = p.data_dir || '';
     document.getElementById('path-flow-files').value = p.flow_files_dir || '';
     document.getElementById('path-meeting-files').value = p.meeting_files_dir || '';
+    document.getElementById('path-service-order').value = p.service_order_dir || '';
     document.getElementById('path-data-dir').placeholder = p.defaults?.data_dir || 'data/';
     document.getElementById('path-flow-files').placeholder = p.defaults?.flow_files_dir || 'public/uploads/flow_files/';
     document.getElementById('path-meeting-files').placeholder = p.defaults?.meeting_files_dir || 'public/uploads/meeting_files/';
+    document.getElementById('path-service-order').placeholder = p.defaults?.service_order_dir || 'public/uploads/service_orders/';
   } catch(e) { console.error("loadPaths error:", e); }
   document.getElementById('path-save-status').textContent = '';
 }
@@ -209,7 +221,8 @@ async function savePaths() {
       body: JSON.stringify({
         data_dir: document.getElementById('path-data-dir').value.trim(),
         flow_files_dir: document.getElementById('path-flow-files').value.trim(),
-        meeting_files_dir: document.getElementById('path-meeting-files').value.trim()
+        meeting_files_dir: document.getElementById('path-meeting-files').value.trim(),
+        service_order_dir: document.getElementById('path-service-order').value.trim()
       })
     });
     const d = await r.json();
@@ -237,6 +250,8 @@ function getFilterParams() {
   if (df) params.date_from = df;
   const dt = document.getElementById('filter-date-to')?.value;
   if (dt) params.date_to = dt;
+  const ip = document.getElementById('filter-is-project')?.value;
+  if (ip) params.is_project = ip;
   const sort = document.getElementById('filter-sort')?.value;
   if (sort) params.sort = sort;
   const order = document.getElementById('filter-order')?.value;
@@ -279,7 +294,7 @@ async function loadOrders() {
       <td>${esc(o.proposer||'-')}</td>
       <td>${o.propose_date||'-'}</td><td>${esc(o.business_launch_date||'-')}</td>
       <td style="text-align:center">${schedHtml}${projHtml}</td>
-      <td><div class="action-group"><button class="btn btn-sm" onclick="window.viewOrder(${o.id})">查看</button><button class="btn btn-sm" onclick="window.editOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="window.deleteOrder(${o.id})">删除</button></div></td>
+      <td><div class="action-group"><button class="btn btn-sm" onclick="window.viewOrder(${o.id})">编辑</button><button class="btn btn-sm btn-danger" onclick="window.deleteOrder(${o.id})">删除</button></div></td>
     </tr>`;
     }
     
@@ -325,6 +340,7 @@ function resetFilters() {
   document.getElementById('filter-department').value = '';
   document.getElementById('filter-date-from').value = '';
   document.getElementById('filter-date-to').value = '';
+  document.getElementById('filter-is-project').value = '';
   document.getElementById('filter-group-orders').value = 'department';
   document.getElementById('filter-sort').value = 'order_number';
   document.getElementById('filter-order').value = 'asc';
@@ -430,6 +446,11 @@ document.getElementById('order-form')?.addEventListener('submit', async e => {
       showToast('创建成功','success');
     }
     closeModal('order-modal'); state.editingOrderId = null; loadOrders();
+    // 如果在详情页内编辑，刷新详情页
+    const detailEl = document.getElementById('detail-modal');
+    if (detailEl && detailEl.classList.contains('open')) {
+      viewOrder(document.getElementById('detail-order-id').value);
+    }
   } catch(e) {
     const msg = e.message || '';
     if (msg.includes('编号')) showFieldError('order_number', msg);
@@ -1595,25 +1616,57 @@ async function loadFiles() {
       d.filters.departments.forEach(dep => { const o = document.createElement('option'); o.value = dep; o.textContent = dep; deptSel.appendChild(o); });
     }
 
-    const tbody = document.querySelector('#files-table tbody');
+    const groupsContainer = document.getElementById('files-groups');
+    const emptyState = document.getElementById('files-empty-state');
     const info = document.getElementById('file-result-info');
     if (info) info.textContent = d.total ? '共 ' + d.total + ' 条' : '';
 
     if (!d.items.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></td></tr>';
+      groupsContainer.innerHTML = '';
+      emptyState.style.display = 'block';
       document.getElementById('files-pagination').innerHTML = '';
       return;
     }
+    emptyState.style.display = 'none';
 
-    tbody.innerHTML = d.items.map(function(f) {
-      return '<tr>' +
-        '<td><a href="/api/files/' + f.id + '/download" target="_blank" style="color:#333;text-decoration:none" title="点击下载">📄 ' + esc(f.original_name) + '</a></td>' +
-        '<td><span class="file-type">' + esc(f.file_type) + '</span></td>' +
-        '<td><a href="javascript:void(0)" onclick="navigate(\'orders\');setTimeout(function(){viewOrder(' + f.order_id + ')},100)" style="color:#1890ff;font-weight:500">' + esc(f.order_number) + '</a><br><span style="font-size:11px;color:#999">' + esc(f.order_name || '') + '</span></td>' +
-        '<td>' + esc(f.department || '-') + '</td>' +
-        '<td>' + (f.sub_batch ? '<span style="font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px">' + esc(f.sub_batch) + '</span>' : '-') + '</td>' +
-        '<td><a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="下载">📥</a> <button class="btn btn-sm btn-danger" onclick="deleteFileFromList(' + f.id + ')" title="删除">🗑</button></td>' +
-        '</tr>';
+    // 按 file_type 分组
+    const grouped = {};
+    d.items.forEach(f => {
+      const type = f.file_type || '未分类';
+      if (!grouped[type]) grouped[type] = [];
+      grouped[type].push(f);
+    });
+    const typeKeys = Object.keys(grouped).sort();
+
+    groupsContainer.innerHTML = typeKeys.map(type => {
+      const files = grouped[type];
+      const fileRows = files.map(f => {
+        return `<div class="file-item">
+          <div class="file-info">
+            <span class="file-type">${esc(f.file_type)}</span>
+            <a href="/api/files/${f.id}/download" target="_blank" style="color:#333;text-decoration:none" title="点击下载">📄 ${esc(f.original_name)}</a>
+            <span style="font-size:11px;color:#999">— ${esc(f.order_number)}${f.order_name ? ' ' + esc(f.order_name) : ''}</span>
+            ${f.sub_batch ? `<span style="font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px">${esc(f.sub_batch)}</span>` : ''}
+          </div>
+          <div class="action-group">
+            <a class="btn btn-sm" href="/api/files/${f.id}/download" target="_blank" title="下载">📥 下载</a>
+            <button class="btn btn-sm btn-danger" onclick="deleteFileFromList(${f.id})" title="删除">🗑 删除</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      return `<div class="file-group-card">
+        <div class="file-group-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.group-arrow').classList.toggle('collapsed')">
+          <div class="group-title">
+            📁 ${esc(type)}
+            <span class="group-count">${files.length} 个文件</span>
+          </div>
+          <span class="group-arrow">▼</span>
+        </div>
+        <div class="file-group-body">
+          ${fileRows}
+        </div>
+      </div>`;
     }).join('');
 
     // 分页

@@ -66,15 +66,35 @@ function getMeetingFileDir() {
   const custom = config.getPath('meeting_files_dir');
   return custom || path.join(DATA_DIR, 'public', 'uploads', 'meeting_files');
 }
+function getServiceOrderDir() {
+  const custom = config.getPath('service_order_dir');
+  return custom || path.join(DATA_DIR, 'public', 'uploads', 'service_orders');
+}
 function getUploadBaseDir() {
   return path.join(DATA_DIR, 'public', 'uploads');
 }
 // Ensure upload directories exist
 function ensureUploadDirs() {
-  const dirs = [getUploadBaseDir(), getFlowFileDir(), getMeetingFileDir()];
+  const dirs = [getUploadBaseDir(), getFlowFileDir(), getMeetingFileDir(), getServiceOrderDir()];
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 }
 ensureUploadDirs();
+
+/** 递归遍历目录，返回所有文件的完整路径数组 */
+function walkDir(dir) {
+  const results = [];
+  const list = fs.readdirSync(dir);
+  for (const item of list) {
+    const fullPath = path.join(dir, item);
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      results.push(...walkDir(fullPath));
+    } else if (stat.isFile()) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
 
 const uploadTemp = multer({
   dest: getUploadBaseDir(),
@@ -115,13 +135,18 @@ function paginate(sql, params, page, pageSize) {
 app.get('/api/orders', (req, res) => {
   try {
     const db = getDatabase();
-    const { page=1, pageSize=10, department, keyword, date_from, date_to, sort='created_at', order='desc', group_by } = req.query;
+    const { page=1, pageSize=10, department, keyword, date_from, date_to, is_project, sort='created_at', order='desc', group_by } = req.query;
     let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
     const params = [];
     if (department) { sql += ' AND department=?'; params.push(department); }
     if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
     if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
     if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
+    if (is_project === '1') {
+      sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+    } else if (is_project === '0') {
+      sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+    }
     // 排序白名单
     const sortFields = { 'created_at':'created_at', 'order_number':'order_number', 'propose_date':'propose_date', 'department':'department', 'name':'name' };
     const sortCol = sortFields[sort] || 'created_at';
@@ -205,8 +230,8 @@ app.get('/api/orders/:id/scan-files', (req, res) => {
     const orderId = parseInt(req.params.id);
     const order = db.prepare('SELECT id, order_number FROM requirement_orders WHERE id=?').get(orderId);
     if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-    const flowDir = getFlowFileDir();
-    if (!fs.existsSync(flowDir)) return res.json({ success: true, data: [], count: 0 });
+    const serviceDir = getServiceOrderDir();
+    if (!fs.existsSync(serviceDir)) return res.json({ success: true, data: [], count: 0 });
     // 已有文件的路径集合
     const existing = new Set(
       db.prepare('SELECT file_path FROM flow_files WHERE order_id=?').all(orderId).map(r => path.resolve(r.file_path))
@@ -215,19 +240,19 @@ app.get('/api/orders/:id/scan-files', (req, res) => {
     const validSubBatches = new Set(
       db.prepare('SELECT DISTINCT sub_batch FROM requirement_points WHERE order_id=? AND sub_batch IS NOT NULL AND sub_batch != ?').all(orderId, '').map(r => r.sub_batch)
     );
-    const files = fs.readdirSync(flowDir).filter(f => fs.statSync(path.join(flowDir, f)).isFile());
+    const allFiles = walkDir(serviceDir);
     const discovered = [];
-    const orderNum = order.order_number; // 如 A01
-    for (const file of files) {
-      const filePath = path.resolve(path.join(flowDir, file));
-      if (existing.has(filePath)) continue;
+    const orderNum = order.order_number;
+    for (const filePath of allFiles) {
+      if (existing.has(path.resolve(filePath))) continue;
+      const fileName = path.basename(filePath);
       // 匹配文件命名格式: 【类型】order_number-名称.扩展名
       // 示例：【需求服务单】A01-需求名称.pdf
-      const bracketEnd = file.indexOf('】');
+      const bracketEnd = fileName.indexOf('】');
       if (bracketEnd === -1) continue;
-      const afterBracket = file.substring(bracketEnd + 1);
+      const afterBracket = fileName.substring(bracketEnd + 1);
       if (!afterBracket.startsWith(orderNum)) continue;
-      const typeMatch = file.match(/【([^】]+)】/);
+      const typeMatch = fileName.match(/【([^】]+)】/);
       const fileType = typeMatch ? typeMatch[1] : '未知';
 
       // 尝试从文件名中提取子单号
@@ -243,7 +268,7 @@ app.get('/api/orders/:id/scan-files', (req, res) => {
         }
       }
 
-      discovered.push({ original_name: file, stored_name: file, file_path: filePath, file_type: fileType, sub_batch: subBatch });
+      discovered.push({ original_name: fileName, stored_name: fileName, file_path: filePath, file_type: fileType, sub_batch: subBatch });
     }
     // 自动关联
     let count = 0;
@@ -898,10 +923,12 @@ app.get('/api/config/paths', (req, res) => {
       data_dir: config.getPath('data_dir'),
       flow_files_dir: config.getPath('flow_files_dir'),
       meeting_files_dir: config.getPath('meeting_files_dir'),
+      service_order_dir: config.getPath('service_order_dir'),
       defaults: {
         data_dir: DATA_DIR,
         flow_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'flow_files'),
-        meeting_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'meeting_files')
+        meeting_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'meeting_files'),
+        service_order_dir: path.join(DATA_DIR, 'public', 'uploads', 'service_orders')
       }
     }});
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -909,7 +936,7 @@ app.get('/api/config/paths', (req, res) => {
 
 app.post('/api/config/paths', (req, res) => {
   try {
-    const { data_dir, flow_files_dir, meeting_files_dir } = req.body || {};
+    const { data_dir, flow_files_dir, meeting_files_dir, service_order_dir } = req.body || {};
     if (data_dir !== undefined) {
       config.setPath('data_dir', data_dir);
       if (data_dir) {
@@ -921,9 +948,11 @@ app.post('/api/config/paths', (req, res) => {
     }
     if (flow_files_dir !== undefined) config.setPath('flow_files_dir', flow_files_dir);
     if (meeting_files_dir !== undefined) config.setPath('meeting_files_dir', meeting_files_dir);
+    if (service_order_dir !== undefined) config.setPath('service_order_dir', service_order_dir);
     // 确保新目录存在
     if (flow_files_dir && !fs.existsSync(flow_files_dir)) fs.mkdirSync(flow_files_dir, { recursive: true });
     if (meeting_files_dir && !fs.existsSync(meeting_files_dir)) fs.mkdirSync(meeting_files_dir, { recursive: true });
+    if (service_order_dir && !fs.existsSync(service_order_dir)) fs.mkdirSync(service_order_dir, { recursive: true });
     res.json({ success: true, message: '路径设置已保存，已立即生效' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

@@ -6,7 +6,7 @@ const defaults = {
   version: ['2026年端午版本', '2026年国庆版本', '2027年元旦版本'],
   system: ['业务服务平台', '会员服务平台', '竞价交易系统', '清算系统'],
   file_type: ['需求服务单', '需求意向书及评估表', '项目需求书'],
-  paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '' }
+  paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '', service_order_dir: '' }
 };
 
 // 默认配置目录：项目 data/ 或 exe 同级 data/

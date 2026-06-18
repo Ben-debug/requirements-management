@@ -14,7 +14,7 @@
   <div class="brand">📋 需求单信息管理 <span>Requirement Order Manager</span></div>
   <div class="nav-items">
     <div class="nav-item active" data-page="orders" onclick="navigate('orders')">📄 需求单管理</div>
-    <div class="nav-item" data-page="meetings" onclick="navigate('meetings')">📅 CCB排期管理</div>
+    <div class="nav-item" data-page="meetings" onclick="navigate('meetings')">📅 排期管理</div>
     <div class="nav-item" data-page="files" onclick="navigate('files')">📎 流转文件</div>
     <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
   </div>
@@ -53,9 +53,9 @@
     <span style="color:#999;font-size:12px">~</span>
     <input type="date" id="filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
     <select id="filter-is-project" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
-      <option value="">全部状态</option>
-      <option value="1">📋 已立项</option>
-      <option value="0">未立项</option>
+      <option value="">是否立项</option>
+      <option value="1">是</option>
+      <option value="0">否</option>
     </select>
     <button class="btn btn-primary" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
     <button class="btn" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
@@ -89,7 +89,7 @@
 
 <!-- Meetings Page -->
 <div id="page-meetings" class="page-content" style="display:none">
-  <div class="page-header"><h2>📅 CCB排期管理</h2><p>管理CCB会议记录，为需求点进行排期</p></div>
+  <div class="page-header"><h2>📅 排期管理</h2><p>管理排期会议，为需求点进行排期</p></div>
   <!-- Tabs -->
   <div class="tab-bar">
     <div class="tab-item active" data-tab="meeting-mgmt" onclick="switchMeetingTab('meeting-mgmt')">📋 会议管理</div>
@@ -97,7 +97,7 @@
   </div>
   <!-- Tab: 会议管理 -->
   <div id="tab-meeting-mgmt" class="tab-content" style="display:block">
-    <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个CCB会议记录，填写会议名称和日期，后续在会议中进行需求点排期">＋ 新建CCB会议</button></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个排期会议，填写会议名称和日期，后续进行需求点排期">＋ 新建排期会议</button></div>
     <div id="meetings-list"></div>
   </div>
   <!-- Tab: 排期查询 -->

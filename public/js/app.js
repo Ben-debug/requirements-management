@@ -1119,7 +1119,7 @@ document.getElementById('meeting-form')?.addEventListener('submit', async e => {
 });
 function showCreateMeeting() {
   state.editingMeetingId = null;
-  document.getElementById('meeting-modal-title').textContent = '新建CCB会议';
+  document.getElementById('meeting-modal-title').textContent = '新建排期会议';
   document.getElementById('meeting-form').reset();
   document.getElementById('meeting-id').value = '';
   document.getElementById('meeting-current-file').style.display = 'none';
@@ -1538,6 +1538,19 @@ function renderScheduleResults(result) {
   const { data: schedules, grouped, total, page, totalPages } = result;
   const c = document.getElementById('schedule-results'); const pc = document.getElementById('schedules-pagination');
   if (!schedules||!schedules.length) { c.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的排期信息</p></div>'; pc.innerHTML = ''; return; }
+  // 汇总信息
+  const projCount = schedules.filter(s => s.is_project).length;
+  const pct = total ? Math.round(projCount / total * 100) : 0;
+  c.innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#fafafa;border-radius:8px;margin-bottom:12px;border:1px solid #e8e8e8">
+    <span style="font-weight:600;font-size:14px;color:#333">📊 汇总</span>
+    <span style="font-size:13px;color:#666">共 <b>${total}</b> 条</span>
+    <span style="font-size:13px;color:#52c41a">📋 已立项 <b>${projCount}</b></span>
+    <span style="font-size:13px;color:#999">未立项 <b>${total - projCount}</b></span>
+    <div style="flex:1;min-width:100px;height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#52c41a,#73d13d);border-radius:4px;transition:width .3s"></div>
+    </div>
+    <span style="font-size:12px;color:#999;min-width:40px;text-align:right">${pct}%</span>
+  </div>`;
   if (grouped) {
     let html = ''; Object.keys(grouped).sort().forEach(key => { const items = grouped[key]; html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`; html += renderScheduleResultsGrouped(items); }); c.innerHTML = html;
   } else {

@@ -126,14 +126,22 @@ app.get('/api/orders', (req, res) => {
     const sortFields = { 'created_at':'created_at', 'order_number':'order_number', 'propose_date':'propose_date', 'department':'department', 'name':'name' };
     const sortCol = sortFields[sort] || 'created_at';
     const sortDir = order === 'asc' ? 'ASC' : 'DESC';
-    sql += ` ORDER BY ${sortCol} ${sortDir}`;
+    // 自然排序：编号字母部分排序后按数字部分排序（M99 < M100）
+    if (sort === 'order_number') {
+      sql += ` ORDER BY SUBSTR(order_number, 1, 1) ${sortDir}, CAST(SUBSTR(order_number, 2) AS INTEGER) ${sortDir}`;
+    } else {
+      sql += ` ORDER BY ${sortCol} ${sortDir}`;
+    }
     const result = paginate(sql, params, parseInt(page), parseInt(pageSize));
     
     // 分组处理（取全部匹配数据分组，但分页仍按当前页）
     let grouped = null;
     if (group_by && group_by === 'department') {
       const allSql = sql.replace(/LIMIT.*/, '');
-      const allItems = db.prepare(`SELECT * FROM (${sql.replace(/ORDER BY.*$/, '')}) ORDER BY department, ${sortCol} ${sortDir}`).all(...params);
+      const sortBy = sort === 'order_number'
+        ? `SUBSTR(order_number, 1, 1) ${sortDir}, CAST(SUBSTR(order_number, 2) AS INTEGER) ${sortDir}`
+        : `${sortCol} ${sortDir}`;
+      const allItems = db.prepare(`SELECT * FROM (${sql.replace(/ORDER BY.*$/, '')}) ORDER BY department, ${sortBy}`).all(...params);
       grouped = {};
       allItems.forEach(o => {
         const key = o.department || '未指定';
@@ -188,6 +196,9 @@ app.get('/api/orders/:id', (req, res) => {
 
 // ---- 文件自动扫描（根据配置的路径检索已有文件） ----
 // 扫描流转文件目录，自动检出并关联未入库的文件
+// 命名规则：
+//   【类型】order_number-描述.ext           → 无子单
+//   【类型】order_number-{子单号}-描述.ext   → 有子单（如 A01-1-功能设计.docx）
 app.get('/api/orders/:id/scan-files', (req, res) => {
   try {
     const db = getDatabase();
@@ -200,24 +211,47 @@ app.get('/api/orders/:id/scan-files', (req, res) => {
     const existing = new Set(
       db.prepare('SELECT file_path FROM flow_files WHERE order_id=?').all(orderId).map(r => path.resolve(r.file_path))
     );
+    // 获取该需求单已存在的子单号，用于校验扫描到的子单是否有效
+    const validSubBatches = new Set(
+      db.prepare('SELECT DISTINCT sub_batch FROM requirement_points WHERE order_id=? AND sub_batch IS NOT NULL AND sub_batch != ?').all(orderId, '').map(r => r.sub_batch)
+    );
     const files = fs.readdirSync(flowDir).filter(f => fs.statSync(path.join(flowDir, f)).isFile());
     const discovered = [];
-    const prefix = `${orderId}-`;
+    const orderNum = order.order_number; // 如 A01
     for (const file of files) {
       const filePath = path.resolve(path.join(flowDir, file));
       if (existing.has(filePath)) continue;
-      if (!file.startsWith(prefix)) continue; // 必须匹配订单ID前缀
+      // 匹配文件命名格式: 【类型】order_number-名称.扩展名
+      // 示例：【需求服务单】A01-需求名称.pdf
+      const bracketEnd = file.indexOf('】');
+      if (bracketEnd === -1) continue;
+      const afterBracket = file.substring(bracketEnd + 1);
+      if (!afterBracket.startsWith(orderNum)) continue;
       const typeMatch = file.match(/【([^】]+)】/);
       const fileType = typeMatch ? typeMatch[1] : '未知';
-      discovered.push({ original_name: file, stored_name: file, file_path: filePath, file_type: fileType });
+
+      // 尝试从文件名中提取子单号
+      // 格式: orderNum-{subBatch}-描述.ext  如 A01-1-功能设计.docx
+      let subBatch = null;
+      const restAfterOrder = afterBracket.substring(orderNum.length);
+      const subBatchMatch = restAfterOrder.match(/^-(\d+)-\s*/);
+      if (subBatchMatch) {
+        const extracted = subBatchMatch[1];
+        // 仅在子单号真实存在时才关联，避免误匹配
+        if (validSubBatches.has(extracted)) {
+          subBatch = extracted;
+        }
+      }
+
+      discovered.push({ original_name: file, stored_name: file, file_path: filePath, file_type: fileType, sub_batch: subBatch });
     }
     // 自动关联
     let count = 0;
     if (discovered.length) {
-      const ins = db.prepare('INSERT OR IGNORE INTO flow_files (order_id, file_type, original_name, file_path, stored_name) VALUES (?,?,?,?,?)');
+      const ins = db.prepare('INSERT OR IGNORE INTO flow_files (order_id, file_type, original_name, file_path, stored_name, sub_batch) VALUES (?,?,?,?,?,?)');
       db.transaction(() => {
         for (const f of discovered) {
-          ins.run(orderId, f.file_type, f.original_name, f.file_path, f.stored_name);
+          ins.run(orderId, f.file_type, f.original_name, f.file_path, f.stored_name, f.sub_batch);
           count++;
         }
       })();
@@ -422,7 +456,7 @@ app.get('/api/meetings', (req, res) => {
 });
 
 app.get('/api/meetings/:id', (req, res) => {
-  try { const db = getDatabase(); const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id); if (!m) return res.status(404).json({ success: false }); const s = db.prepare(`SELECT cs.*, ro.order_number, ro.name as order_name, rp.point_number, rp.sub_batch, rp.description as point_description FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id WHERE cs.meeting_id=? ORDER BY ro.order_number, rp.point_number`).all(req.params.id); res.json({ success: true, data: { ...m, schedules: s } }); }
+  try { const db = getDatabase(); const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id); if (!m) return res.status(404).json({ success: false }); const s = db.prepare(`SELECT cs.*, ro.order_number, ro.name as order_name, rp.point_number, rp.sub_batch, rp.description as point_description FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id WHERE cs.meeting_id=? ORDER BY SUBSTR(ro.order_number, 1, 1), CAST(SUBSTR(ro.order_number, 2) AS INTEGER), rp.point_number`).all(req.params.id); res.json({ success: true, data: { ...m, schedules: s } }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -478,7 +512,14 @@ app.post('/api/meetings/:meetingId/schedules/batch', (req, res) => {
     if (!schedules||!schedules.length) return res.status(400).json({ success: false, message: '请选择排期' });
     const ins = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project) VALUES (?,?,?,?,?,?)');
     const upd = db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?');
-    db.transaction(() => { schedules.forEach(s => { ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version, s.is_project||0); upd.run(s.system, s.version, s.point_id); }); })();
+    const updBatch = db.prepare('UPDATE requirement_points SET sub_batch=? WHERE id=?');
+    db.transaction(() => {
+      schedules.forEach(s => {
+        ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version, s.is_project||0);
+        upd.run(s.system, s.version, s.point_id);
+        if (s.sub_batch) updBatch.run(s.sub_batch, s.point_id);
+      });
+    })();
     res.json({ success: true, data: { count: schedules.length } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -512,7 +553,7 @@ app.delete('/api/schedules/:id', (req, res) => {
 });
 
 app.get('/api/unscheduled-points', (req, res) => {
-  try { const db = getDatabase(); res.json({ success: true, data: db.prepare(`SELECT rp.*, ro.order_number, ro.name as order_name FROM requirement_points rp JOIN requirement_orders ro ON rp.order_id=ro.id WHERE rp.id NOT IN (SELECT point_id FROM ccb_schedules) ORDER BY ro.order_number, rp.point_number`).all() }); }
+  try { const db = getDatabase(); res.json({ success: true, data: db.prepare(`SELECT rp.*, ro.order_number, ro.name as order_name FROM requirement_points rp JOIN requirement_orders ro ON rp.order_id=ro.id WHERE rp.id NOT IN (SELECT point_id FROM ccb_schedules) ORDER BY SUBSTR(ro.order_number, 1, 1), CAST(SUBSTR(ro.order_number, 2) AS INTEGER), rp.point_number`).all() }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -590,7 +631,7 @@ app.get('/api/export/filtered', (req, res) => {
     if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
     if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
     if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
-    sql += ' ORDER BY order_number';
+    sql += ' ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)';
     const orders = db.prepare(sql).all(...params);
     exportOrdersToExcel(orders, res);
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -661,7 +702,7 @@ function exportOrdersToExcel(orders, res) {
 app.get('/api/export', (req, res) => {
   try {
     const db = getDatabase();
-    const orders = db.prepare('SELECT * FROM requirement_orders ORDER BY order_number').all();
+    const orders = db.prepare('SELECT * FROM requirement_orders ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)').all();
     exportOrdersToExcel(orders, res);
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

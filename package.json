@@ -1,6 +1,6 @@
 {
   "name": "requirement-manager",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "description": "需求单信息管理系统",
   "main": "server/index.js",
   "bin": "server/index.js",
@@ -16,8 +16,12 @@
     "build": "npx pkg . --targets node18-win-x64 --no-bytecode --no-native-build --output Release/需求单信息管理系统.exe"
   },
   "pkg": {
-    "assets": ["public/**/*"],
-    "targets": ["node18-win-x64"]
+    "assets": [
+      "public/**/*"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   },
   "keywords": [],
   "author": "",

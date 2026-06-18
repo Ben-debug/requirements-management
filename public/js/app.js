@@ -28,6 +28,8 @@ function navigate(page) {
   else if (page === 'meetings') { loadMeetings(); switchMeetingTab('meeting-mgmt'); }
   else if (page === 'files') loadFiles();
   else if (page === 'config') loadConfig();
+  // 更新 URL hash，支持刷新恢复页签和浏览器回退/前进
+  if (location.hash !== '#' + page) location.hash = '#' + page;
 }
 
 function switchMeetingTab(tab) {
@@ -941,7 +943,7 @@ async function showScheduleModal(pointId, orderId) {
 
 async function confirmQuickSchedule() {
   const pointId = document.getElementById('schedule-point-id').value, orderId = document.getElementById('schedule-order-id').value;
-  const meetingId = document.getElementById('detail-schedule-meeting').value, systems = getSelectedSystems(), version = document.getElementById('detail-schedule-version').value;
+  const meetingId = document.getElementById('detail-schedule-meeting').value, systems = getSelectedSystems('detail-schedule-systems'), version = document.getElementById('detail-schedule-version').value;
   if (!meetingId) { showToast('请选择CCB会议','error'); return; } if (!systems.length) { showToast('请至少选择一个系统','error'); return; } if (!version) { showToast('请选择版本','error'); return; }
   const isProject = document.getElementById('detail-schedule-is-project').checked ? 1 : 0;
   try {
@@ -996,7 +998,7 @@ async function openEditScheduleModal(scheduleId, orderId) {
 
 async function confirmEditSchedule() {
   const scheduleId = document.getElementById('edit-schedule-id').value, meetingId = document.getElementById('edit-schedule-meeting').value;
-  const systems = getSelectedSystems(), version = document.getElementById('edit-schedule-version').value;
+  const systems = getSelectedSystems('edit-schedule-systems'), version = document.getElementById('edit-schedule-version').value;
   if (!systems.length) { showToast('请至少选择一个系统','error'); return; } if (!version) { showToast('请选择版本','error'); return; }
   const isProject = document.getElementById('edit-schedule-is-project').checked ? 1 : 0;
   try {
@@ -1182,85 +1184,194 @@ async function loadBatchScheduleTable() {
   try {
     const [points, sysOpts, verOpts] = await Promise.all([api('/api/unscheduled-points'), api('/api/config/system'), api('/api/config/version')]);
     const pts = points.data || points, sys = sysOpts.data || sysOpts, ver = verOpts.data || verOpts;
-    if (!pts.length) { c.innerHTML = '<div style="padding:20px;text-align:center;color:#999">✅ 所有需求点已完成排期</div>'; return; }
-    
-    // 按(需求单, 子单批次)分组
-    const groups = {};
+    if (!pts.length) { c.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>所有需求点已完成排期</p></div>'; return; }
+
+    // 按需求单分组
+    const orderGroups = {};
     pts.forEach(p => {
-      const key = p.order_number + '|' + (p.sub_batch || '');
-      if(!groups[key]) groups[key] = { order_number: p.order_number, order_name: p.order_name, sub_batch: p.sub_batch || '', points: [] };
-      groups[key].points.push(p);
+      const key = p.order_number;
+      if (!orderGroups[key]) orderGroups[key] = { order_number: p.order_number, order_name: p.order_name, points: [] };
+      orderGroups[key].points.push(p);
     });
-    const sortedKeys = Object.keys(groups).sort((a,b) => {
-      const [oa, ba] = a.split('|'), [ob, bb] = b.split('|');
-      if (oa !== ob) return oa < ob ? -1 : 1;
-      return (parseInt(ba)||0) - (parseInt(bb)||0);
+    // 对需求单排序（自然排序）
+    const sortedOrderKeys = Object.keys(orderGroups).sort((a, b) => {
+      const aLetter = a.charAt(0), bLetter = b.charAt(0);
+      if (aLetter !== bLetter) return aLetter < bLetter ? -1 : 1;
+      return parseInt(a.substring(1)) - parseInt(b.substring(1));
     });
-    
-    let html = '<table style="width:100%;font-size:13px"><thead><tr><th style="padding:6px 8px;width:30px"><input type="checkbox" id="batch-select-all" onchange="toggleAllBatch()"></th><th style="padding:6px 8px">需求点</th><th style="padding:6px 8px">描述</th><th style="padding:6px 8px;min-width:180px">涉及系统</th><th style="padding:6px 8px;width:120px">版本</th></tr></thead><tbody>';
-    
-    sortedKeys.forEach(key => {
-      const grp = groups[key];
+
+    let html = '<div id="schedule-order-list">';
+
+    sortedOrderKeys.forEach(okey => {
+      const grp = orderGroups[okey];
       const pts = grp.points;
-      
-      if (grp.sub_batch) {
-        // 有批次号的子单组：显示为一行，整批选系统/版本
-        const batchLabel = grp.order_number + '-' + grp.sub_batch;
-        html += `<tr style="background:#f0f5ff"><td style="padding:6px 8px;text-align:center"><input type="checkbox" class="batch-point-cb" value="${pts[0].id}" data-order="${pts[0].order_id}" data-batch="${grp.sub_batch}" onchange="toggleBatchGroup(this)"></td>`;
-        html += `<td style="padding:6px 8px" colspan="2"><span style="font-weight:600;color:#1890ff;font-size:13px">📁 ${batchLabel}</span> <span style="font-size:11px;color:#999">(${pts.length}项)</span></td>`;
-        html += `<td style="padding:6px 8px"><div class="batch-sys-container" style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;margin:1px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="batch-sys-cb" value="${s}" style="width:12px;height:12px">${s}</label>`).join('')}</div></td>`;
-        html += `<td style="padding:6px 8px"><select class="batch-version" style="width:100%;padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px"><option value="">选择..</option>${ver.map(v => `<option value="${v}">${v}</option>`).join('')}</select></td></tr>`;
-      } else {
-        // 无批次号：逐个显示
-        html += `<tr style="background:#f5f5f5"><td colspan="5" style="padding:6px 8px;font-weight:600;font-size:13px">${grp.order_number} - ${esc(grp.order_name)}</td></tr>`;
-        pts.forEach(p => {
-          html += `<tr><td style="padding:6px 8px;text-align:center"><input type="checkbox" class="batch-point-cb" value="${p.id}" data-order="${p.order_id}"></td>`;
-          html += `<td style="padding:6px 8px"><span style="color:#1890ff;font-weight:500">${esc(p.point_number)}</span></td>`;
-          html += `<td style="padding:6px 8px;color:#666">${esc(p.description.substring(0,40))}${p.description.length>40?'...':''}</td>`;
-          html += `<td style="padding:6px 8px"><div class="batch-sys-container" style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;margin:1px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="batch-sys-cb" value="${s}" style="width:12px;height:12px">${s}</label>`).join('')}</div></td>`;
-          html += `<td style="padding:6px 8px"><select class="batch-version" style="width:100%;padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px"><option value="">选择..</option>${ver.map(v => `<option value="${v}">${v}</option>`).join('')}</select></td></tr>`;
+      const orderTotal = pts.length;
+
+      html += `<div class="schedule-order-card" data-order="${pts[0].order_id}" data-order-number="${esc(okey)}">
+        <div class="schedule-order-header" onclick="toggleScheduleOrder(this)">
+          <div class="header-left">
+            <input type="checkbox" class="order-select-all" onclick="event.stopPropagation();toggleOrderPoints(this)" title="全选本单">
+            <span class="schedule-order-arrow">▶</span>
+            <span style="font-weight:600;font-size:14px;color:#1890ff">${esc(okey)}</span>
+            <span style="font-size:13px;color:#333;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(grp.order_name)}</span>
+            <span class="badge badge-blue">${orderTotal}个待排期</span>
+          </div>
+          <div class="header-right">
+            <span style="font-size:11px;color:#999">点击展开</span>
+            <span class="schedule-order-arrow" style="font-size:14px">▶</span>
+          </div>
+        </div>
+        <div class="schedule-order-body">`;
+
+      // 按子单批次分组（用于合并系统/版本选择）
+      const batched = {}, unbatched = [];
+      pts.forEach(p => {
+        if (p.sub_batch) {
+          if (!batched[p.sub_batch]) batched[p.sub_batch] = [];
+          batched[p.sub_batch].push(p);
+        } else {
+          unbatched.push(p);
+        }
+      });
+
+      // 有子单的批次：可折叠展开，展开后逐点设置系统/版本
+      Object.keys(batched).sort().forEach(batch => {
+        const bpts = batched[batch];
+        const batchLabel = okey + '-' + batch;
+        html += `<div class="batch-sub-card" style="border:1px solid #e8e8e8;border-radius:6px;margin-bottom:8px;overflow:hidden;background:#fff">
+          <div class="batch-sub-header" onclick="toggleBatchBody(this)" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0f5ff;border-left:3px solid #1890ff;user-select:none">
+            <span class="batch-expand-arrow" style="font-size:12px;color:#999;transition:transform .2s;width:14px;text-align:center">▶</span>
+            <input type="checkbox" class="point-cb batch-selector" value="${bpts[0].id}" data-order="${bpts[0].order_id}" data-batch="${batch}" onclick="event.stopPropagation();toggleBatchPoints(this)">
+            <span style="font-weight:600;font-size:13px;color:#1890ff">📁 ${esc(batchLabel)}</span>
+            <span class="badge badge-blue">${bpts.length}项</span>
+            <span style="font-size:11px;color:#999;margin-left:auto">点击展开逐点设置</span>
+          </div>
+          <div class="batch-sub-body" style="display:none;padding:6px 10px 10px">`;
+        bpts.forEach(p => {
+          html += `<div class="batch-point-item" style="border:1px solid #f0f0f0;border-radius:6px;margin-bottom:6px;padding:8px 10px;background:#fff">
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px">
+              <input type="checkbox" class="point-cb" value="${p.id}" data-order="${p.order_id}" style="margin-top:3px">
+              <span class="point-number" style="font-size:12px;white-space:nowrap">${esc(p.point_number)}</span>
+              <input type="text" class="batch-input" placeholder="子单号" value="${esc(batch)}" style="width:62px;padding:1px 4px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px">
+              <div style="flex:1;min-width:0">
+                <div id="bd-${p.id}" class="${p.description && p.description.length > 60 ? 'point-desc-clamped' : ''}" style="font-size:12px;color:#555;line-height:1.5">${esc(p.description).replace(/\n/g, '<br>')}</div>
+                ${p.description && p.description.length > 60 ? `<span class="desc-toggle-btn" onclick="toggleBatchDesc('bd-${p.id}')" style="font-size:11px">展开全文 ▼</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:24px">
+              <span style="font-size:11px;color:#999;white-space:nowrap">涉及系统:</span>
+              <div style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="sys-cb" value="${s}" style="width:11px;height:11px">${s}</label>`).join('')}</div>
+              <span style="font-size:11px;color:#999;white-space:nowrap">上线版本:</span>
+              <select class="ver-select" style="padding:2px 6px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px;min-width:90px"><option value="">请选择</option>${ver.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
+            </div>
+          </div>`;
+        });
+        html += `</div></div>`;
+      });
+
+      // 无子单的点：逐行显示，每行可录入子单号
+      if (unbatched.length) {
+        // 如果有批次存在，加一个小标题
+        if (Object.keys(batched).length) {
+          html += `<div style="padding:6px 0;font-size:12px;color:#999">📄 基础需求点（无子单，可录入批次号）</div>`;
+        }
+        unbatched.forEach(p => {
+          html += `<div class="batch-point-item" style="border:1px solid #f0f0f0;border-radius:6px;margin-bottom:6px;padding:8px 10px;background:#fff">
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px">
+              <input type="checkbox" class="point-cb" value="${p.id}" data-order="${p.order_id}" style="margin-top:3px">
+              <span class="point-number" style="font-size:12px;white-space:nowrap">${esc(p.point_number)}</span>
+              <input type="text" class="batch-input" placeholder="子单号" value="" style="width:62px;padding:1px 4px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px">
+              <div style="flex:1;min-width:0">
+                <div id="bu-${p.id}" class="${p.description && p.description.length > 60 ? 'point-desc-clamped' : ''}" style="font-size:12px;color:#555;line-height:1.5">${esc(p.description).replace(/\n/g, '<br>')}</div>
+                ${p.description && p.description.length > 60 ? `<span class="desc-toggle-btn" onclick="toggleBatchDesc('bu-${p.id}')" style="font-size:11px">展开全文 ▼</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:24px">
+              <span style="font-size:11px;color:#999;white-space:nowrap">涉及系统:</span>
+              <div style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="sys-cb" value="${s}" style="width:11px;height:11px">${s}</label>`).join('')}</div>
+              <span style="font-size:11px;color:#999;white-space:nowrap">上线版本:</span>
+              <select class="ver-select" style="padding:2px 6px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px;min-width:90px"><option value="">请选择</option>${ver.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
+            </div>
+          </div>`;
         });
       }
+
+      html += `</div></div>`; // /.schedule-order-body, /.schedule-order-card
     });
-    
-    html += '</tbody></table><div style="margin-top:12px"><button class="btn btn-primary" onclick="saveBatchSchedules()">💾 批量保存</button></div>';
+
+    html += '</div><div style="margin-top:16px"><button class="btn btn-primary" onclick="saveBatchSchedules()">💾 批量保存排期</button></div>';
     c.innerHTML = html;
   } catch(e) { c.innerHTML = '<div style="padding:12px;color:#999">加载失败</div>'; }
+}
+
+function toggleScheduleOrder(header) {
+  const body = header.nextElementSibling;
+  const arrows = header.querySelectorAll('.schedule-order-arrow');
+  body.classList.toggle('expanded');
+  arrows.forEach(a => a.classList.toggle('expanded'));
+}
+function toggleOrderPoints(selectAll) {
+  const card = selectAll.closest('.schedule-order-card');
+  const checked = selectAll.checked;
+  card.querySelectorAll('.point-cb').forEach(cb => cb.checked = checked);
+}
+function toggleBatchBody(header) {
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('.batch-expand-arrow');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+}
+function toggleBatchDesc(descId) {
+  const el = document.getElementById(descId);
+  if (!el) return;
+  const isClamped = el.classList.contains('point-desc-clamped');
+  const btn = el.parentElement.querySelector('.desc-toggle-btn');
+  if (isClamped) {
+    el.classList.remove('point-desc-clamped');
+    if (btn) btn.textContent = '收起 ▲';
+  } else {
+    el.classList.add('point-desc-clamped');
+    if (btn) btn.textContent = '展开全文 ▼';
+  }
+}
+function toggleBatchPoints(selectAll) {
+  const card = selectAll.closest('.batch-sub-card');
+  const checked = selectAll.checked;
+  if (card) card.querySelectorAll('.point-cb').forEach(cb => cb.checked = checked);
 }
 function toggleAllBatch() {
   const checked = document.getElementById('batch-select-all')?.checked;
   document.querySelectorAll('.batch-point-cb').forEach(cb => cb.checked = !!checked);
 }
-function getBatchSystems(row) { return Array.from(row.querySelectorAll('.batch-sys-cb:checked')).map(cb => cb.value); }
+function getBatchSystems(row) { return Array.from(row.querySelectorAll('.sys-cb:checked')).map(cb => cb.value); }
 async function saveBatchSchedules() {
   const meetingId = document.getElementById('schedule-meeting-id').value;
-  const orderId = document.getElementById('schedule-meeting-id').dataset.orderId;
-  const checkboxes = document.querySelectorAll('.batch-point-cb');
+  const checkboxes = document.querySelectorAll('.point-cb:checked');
   const schedules = [];
-  
+  // 收集已处理过的 point_id 去重（批次级的 batch-selector 和其下的子 checkbox 可能重复）
+  const seenPointIds = new Set();
+
   for (const cb of checkboxes) {
-    if (!cb.checked) continue;
-    const tr = cb.closest('tr');
-    const systems = getBatchSystems(tr);
-    const version = tr.querySelector('.batch-version')?.value;
+    const row = cb.closest('.point-row');
+    if (!row) continue;
+    const systems = getBatchSystems(row);
+    const version = row.querySelector('.ver-select')?.value;
     if (!systems.length || !version) continue;
-    
-    const batch = cb.dataset.batch;
+
+    const point_id = parseInt(cb.value);
     const order_id = parseInt(cb.dataset.order);
-    if (batch) {
-      // 批量勾选：获取该订单+批次下所有未排期点
-      const unscheduledResp = await fetch('/api/unscheduled-points');
-      const unscheduledData = await unscheduledResp.json();
-      const unscheduledPoints = unscheduledData.data || unscheduledData;
-      const batchPoints = unscheduledPoints.filter(p => p.order_id === order_id && p.sub_batch === batch);
-      batchPoints.forEach(p => {
-        schedules.push({order_id, point_id: p.id, system: systems.join(','), version});
-      });
-    } else {
-      schedules.push({order_id, point_id: parseInt(cb.value), system: systems.join(','), version});
-    }
+    if (seenPointIds.has(point_id)) continue;
+    seenPointIds.add(point_id);
+
+    // 读取子单号输入
+    const subBatchInput = row.querySelector('.batch-input');
+    const subBatch = subBatchInput ? subBatchInput.value.trim() : '';
+
+    schedules.push({order_id, point_id, system: systems.join(','), version, sub_batch: subBatch || undefined});
   }
-  
+
   if (!schedules.length) { showToast('请勾选并完善','error'); return; }
   try {
     const r = await fetch(`/api/meetings/${meetingId}/schedules/batch`, {
@@ -1281,29 +1392,6 @@ function toggleBatchGroup(cb) {
   if (batch) {
     // 本批次已通过批次行处理，无需额外操作
   }
-}
-function renderMeetingSchedules(schedules) {
-  const c = document.getElementById('schedule-list'); if (!schedules.length) { c.innerHTML = '<div class="empty-state"><p>暂无排期记录</p></div>'; return; }
-  // 按子单批次分组
-  const groups = {};
-  schedules.forEach(s => {
-    const key = s.sub_batch ? s.order_number+'-'+s.sub_batch : s.order_number+'_'+s.point_number;
-    if (!groups[key]) groups[key] = { label: s.sub_batch ? s.order_number+'-'+s.sub_batch : '', items: [] };
-    groups[key].items.push(s);
-  });
-  let html = '';
-  Object.keys(groups).sort().forEach(key => {
-    const g = groups[key];
-    if (g.label) {
-      html += `<div style="padding:6px 12px;margin-top:12px;background:#f0f5ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff;border-left:4px solid #1890ff">📁 ${esc(g.label)}</div>`;
-    }
-    g.items.forEach(s => {
-      const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
-      const projTag = s.is_project ? '<span class="sched-tag">📋 已立项</span>' : '';
-      html += `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}</div><div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div></div><div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag}</div></div>`;
-    });
-  });
-  c.innerHTML = html;
 }
 async function deleteScheduleFromMeeting(id) { if (!confirm('确定移除？')) return; try { await api(`/api/schedules/${id}`,{method:'DELETE'}); showToast('已移除','success'); viewMeeting(document.getElementById('schedule-meeting-id').value); } catch(e) {} }
 async function openEditScheduleModalFromMeeting(scheduleId) {
@@ -1348,20 +1436,91 @@ async function applyFilter() {
 
 function resetFilter() { document.querySelectorAll('.filter-row select').forEach(el => el.value = ''); state.schedulePage = 1; applyFilter(); }
 
+function renderScheduledCard(s, opts) {
+  opts = opts || {};
+  const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
+  const batchTag = s.sub_batch ? ` <span style="font-size:11px;color:#1890ff;background:#f0f5ff;padding:1px 6px;border-radius:3px">${esc(s.order_number)}-${esc(s.sub_batch)}</span>` : '';
+  const projTag = s.is_project ? '<span class="sched-tag">📋 已立项</span>' : '';
+  return `<div class="schedule-card" style="margin-bottom:6px">
+    <div class="sched-header">
+      <div class="sched-title">${esc(s.point_number)}${batchTag}</div>
+      ${opts.showActions ? `<div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div>` : ''}
+      ${opts.showMeeting ? `<div style="font-size:12px;color:#888">${esc(s.meeting_name)} (${s.meeting_date})</div>` : ''}
+    </div>
+    <div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div>
+    ${opts.showDepartment && s.department ? `<div class="sched-meta">部门: ${esc(s.department)}</div>` : ''}
+    <div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag}</div>
+  </div>`;
+}
+
+// 共享的三级折叠列表渲染：需求单 → 子单 → 点
+function renderScheduleHierarchy(schedules, renderPointFn) {
+  const orderGroups = {};
+  schedules.forEach(s => {
+    const key = s.order_number;
+    if (!orderGroups[key]) orderGroups[key] = { order_number: s.order_number, order_name: s.order_name || '', items: [] };
+    orderGroups[key].items.push(s);
+  });
+  const sortedOrderKeys = Object.keys(orderGroups).sort((a, b) => {
+    const aL = a.charAt(0), bL = b.charAt(0);
+    if (aL !== bL) return aL < bL ? -1 : 1;
+    return parseInt(a.substring(1)) - parseInt(b.substring(1));
+  });
+  let html = '<div id="schedule-scheduled-list">';
+  sortedOrderKeys.forEach(okey => {
+    const grp = orderGroups[okey], pts = grp.items;
+    html += `<div class="schedule-order-card">
+      <div class="schedule-order-header" onclick="toggleScheduleOrder(this)">
+        <div class="header-left">
+          <span class="schedule-order-arrow">▶</span>
+          <span style="font-weight:600;font-size:14px;color:#1890ff">${esc(okey)}</span>
+          <span style="font-size:13px;color:#333;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(grp.order_name)}</span>
+          <span class="badge badge-green">${pts.length}个已排期</span>
+        </div>
+        <div class="header-right">
+          <span style="font-size:11px;color:#999">点击展开</span>
+          <span class="schedule-order-arrow" style="font-size:14px">▶</span>
+        </div>
+      </div>
+      <div class="schedule-order-body">`;
+    const batched = {}, unbatched = [];
+    pts.forEach(s => { if (s.sub_batch) { if (!batched[s.sub_batch]) batched[s.sub_batch] = []; batched[s.sub_batch].push(s); } else { unbatched.push(s); } });
+    Object.keys(batched).sort().forEach(batch => {
+      const bpts = batched[batch], label = okey + '-' + batch;
+      html += `<div class="batch-sub-card" style="border:1px solid #e8e8e8;border-radius:6px;margin:0 0 8px;overflow:hidden;background:#fff">
+        <div class="batch-sub-header" onclick="toggleBatchBody(this)" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0f5ff;border-left:3px solid #52c41a;user-select:none">
+          <span class="batch-expand-arrow" style="font-size:12px;color:#999;transition:transform .2s;width:14px;text-align:center">▶</span>
+          <span style="font-weight:600;font-size:13px;color:#1890ff">📁 ${esc(label)}</span>
+          <span class="badge badge-green">${bpts.length}项</span>
+          <span style="font-size:11px;color:#999;margin-left:auto">点击展开</span>
+        </div>
+        <div class="batch-sub-body" style="display:none;padding:6px 10px 10px">${bpts.map(s => renderPointFn(s)).join('')}</div></div>`;
+    });
+    unbatched.forEach(s => { html += renderPointFn(s); });
+    html += `</div></div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderMeetingSchedules(schedules) {
+  const c = document.getElementById('schedule-list');
+  if (!schedules.length) { c.innerHTML = '<div class="empty-state"><p>暂无排期记录</p></div>'; return; }
+  c.innerHTML = renderScheduleHierarchy(schedules, s => renderScheduledCard(s, { showActions: true }));
+}
+
+function renderScheduleResultsGrouped(schedules) {
+  return renderScheduleHierarchy(schedules, s => renderScheduledCard(s, { showMeeting: true, showDepartment: true }));
+}
+
 function renderScheduleResults(result) {
   const { data: schedules, grouped, total, page, totalPages } = result;
   const c = document.getElementById('schedule-results'); const pc = document.getElementById('schedules-pagination');
   if (!schedules||!schedules.length) { c.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的排期信息</p></div>'; pc.innerHTML = ''; return; }
-  function schedCard(s) {
-    const systems = s.system ? s.system.split(',').map(x=>x.trim()).filter(Boolean) : [];
-    const batchTag = s.sub_batch ? ` <span style="font-size:11px;color:#1890ff;background:#f0f5ff;padding:1px 6px;border-radius:3px">${esc(s.order_number)}-${esc(s.sub_batch)}</span>` : '';
-    const projTag2 = s.is_project ? '<span class="sched-tag">📋 已立项</span>' : '';
-    return `<div class="schedule-card"><div class="sched-header"><div class="sched-title">${esc(s.order_number)} - ${esc(s.point_number)}${batchTag}</div><div class="sched-meta">${esc(s.meeting_name)} (${s.meeting_date})</div></div><div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div><div class="sched-meta">部门: ${esc(s.department||'-')}</div><div class="sched-tags">${systems.map(sys => `<span class="sched-tag">📦 ${esc(sys)}</span>`).join('')}<span class="sched-tag">🏷️ ${esc(s.version)}</span>${projTag2}</div></div>`;
-  }
   if (grouped) {
-    let html = ''; Object.keys(grouped).sort().forEach(key => { const items = grouped[key]; html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`; html += items.map(s => schedCard(s)).join(''); }); c.innerHTML = html;
+    let html = ''; Object.keys(grouped).sort().forEach(key => { const items = grouped[key]; html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`; html += renderScheduleResultsGrouped(items); }); c.innerHTML = html;
   } else {
-    c.innerHTML = schedules.map(s => schedCard(s)).join('');
+    c.innerHTML = renderScheduleResultsGrouped(schedules);
   }
   if (totalPages > 1) { pc.innerHTML = `<button class="page-btn" onclick="gotoSchedulePage(1)" ${page<=1?'disabled':''}>«</button><button class="page-btn" onclick="gotoSchedulePage(${page-1})" ${page<=1?'disabled':''}>‹</button><span class="page-info">第 ${page}/${totalPages} 页 (共${total}条)</span><button class="page-btn" onclick="gotoSchedulePage(${page+1})" ${page>=totalPages?'disabled':''}>›</button><button class="page-btn" onclick="gotoSchedulePage(${totalPages})" ${page>=totalPages?'disabled':''}>»</button>`; }
   else pc.innerHTML = '';
@@ -1441,7 +1600,7 @@ async function loadFiles() {
     if (info) info.textContent = d.total ? '共 ' + d.total + ' 条' : '';
 
     if (!d.items.length) {
-      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></td></tr>';
       document.getElementById('files-pagination').innerHTML = '';
       return;
     }
@@ -1453,7 +1612,6 @@ async function loadFiles() {
         '<td><a href="javascript:void(0)" onclick="navigate(\'orders\');setTimeout(function(){viewOrder(' + f.order_id + ')},100)" style="color:#1890ff;font-weight:500">' + esc(f.order_number) + '</a><br><span style="font-size:11px;color:#999">' + esc(f.order_name || '') + '</span></td>' +
         '<td>' + esc(f.department || '-') + '</td>' +
         '<td>' + (f.sub_batch ? '<span style="font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px">' + esc(f.sub_batch) + '</span>' : '-') + '</td>' +
-        '<td style="font-size:12px;color:#999">' + (f.uploaded_at || '-') + '</td>' +
         '<td><a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="下载">📥</a> <button class="btn btn-sm btn-danger" onclick="deleteFileFromList(' + f.id + ')" title="删除">🗑</button></td>' +
         '</tr>';
     }).join('');
@@ -1524,6 +1682,13 @@ window.editOrder = editOrder;
 window.deleteOrder = deleteOrder;
 
 document.addEventListener('DOMContentLoaded', function() {
-  loadOrders(); loadDropdowns();
+  // 从 URL hash 恢复页面（如 #meetings、#files、#config），默认到 orders
+  const initPage = location.hash && location.hash.slice(1) || 'orders';
+  loadDropdowns();
+  navigate(initPage);
+});
+window.addEventListener('hashchange', function() {
+  const page = location.hash && location.hash.slice(1);
+  if (page && page !== state.currentPage) navigate(page);
 });
 

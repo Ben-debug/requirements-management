@@ -736,9 +736,6 @@ function exportOrdersToExcel(orders, res) {
   const fileName = `需求单信息-${dateStr}.xlsx`;
   const fp = path.join(getUploadBaseDir(), fileName);
   xlsx.writeFile(wb, fp);
-  // 手动设置 Content-Disposition，确保中文文件名正确编码
-  const encodedName = encodeURIComponent(fileName);
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${encodedName}`);
   res.download(fp, fileName, err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
 }
 

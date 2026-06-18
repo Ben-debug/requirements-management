@@ -1565,7 +1565,17 @@ async function doExport(url) {
     // 从 Content-Disposition 或 URL 提取文件名
     const cd = r.headers.get('Content-Disposition');
     let filename = `需求单信息-${new Date().toISOString().slice(0,10)}.xlsx`;
-    if (cd) { const m = cd.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i); if (m) filename = decodeURIComponent(m[1]); }
+    if (cd) {
+      // 优先取 filename*=UTF-8'' 编码格式
+      let m = cd.match(/filename\*=(?:UTF-8'')?([^;\s]+)/i);
+      if (m) {
+        filename = decodeURIComponent(m[1]);
+      } else {
+        // 降级取 filename=，去除可能的外层引号
+        m = cd.match(/filename=(?:"([^"]+)"|([^;\s]+))/i);
+        if (m) filename = m[1] || m[2];
+      }
+    }
     // 触发下载
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();

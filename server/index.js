@@ -660,13 +660,18 @@ app.get('/api/schedules/filter', (req, res) => {
 app.get('/api/export/filtered', (req, res) => {
   try {
     const db = getDatabase();
-    const { department, keyword, date_from, date_to } = req.query;
+    const { department, keyword, date_from, date_to, is_project } = req.query;
     let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
     const params = [];
     if (department) { sql += ' AND department=?'; params.push(department); }
     if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
     if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
     if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }
+    if (is_project === '1') {
+      sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+    } else if (is_project === '0') {
+      sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+    }
     sql += ' ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)';
     const orders = db.prepare(sql).all(...params);
     exportOrdersToExcel(orders, res);
@@ -714,7 +719,7 @@ function exportOrdersToExcel(orders, res) {
         const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
         rows.push(Object.assign({
           '需求单编号':o.order_number, '需求单名称':o.name, '业务部门':o.department||'', '关联部门':o.related_departments||'',
-          '提出人':o.proposer||'', '提出日期':o.propose_date||'', '业务上线预期':o.business_launch_date||'',
+          '提出人':o.proposer||'', '提出日期':o.propose_date||'', '提出背景':o.background||'', '业务上线预期':o.business_launch_date||'',
           '需求点编号':p.point_number, '需求点描述':p.description,
           '涉及系统':sche ? sche.system : (p.system||''), '上线版本':sche ? sche.version : (p.version||''),
           'CCB会议':sche ? sche.meeting_name : '', '排期日期':sche ? sche.meeting_date : ''
@@ -731,6 +736,9 @@ function exportOrdersToExcel(orders, res) {
   const fileName = `需求单信息-${dateStr}.xlsx`;
   const fp = path.join(getUploadBaseDir(), fileName);
   xlsx.writeFile(wb, fp);
+  // 手动设置 Content-Disposition，确保中文文件名正确编码
+  const encodedName = encodeURIComponent(fileName);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${encodedName}`);
   res.download(fp, fileName, err => { if (err) console.error(err); setTimeout(()=>{try{fs.unlinkSync(fp)}catch(e){}}, 5000); });
 }
 

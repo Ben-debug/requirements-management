@@ -152,6 +152,11 @@ function toggleConfigGroup(header) {
 async function loadConfig() {
   try {
     const d = await api('/api/config'); const data = d.data;
+    // 显示配置文件路径
+    const configPathEl = document.getElementById('config-file-path');
+    if (configPathEl && d.config_path) {
+      configPathEl.innerHTML = `📄 配置文件路径：<code style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:12px;word-break:break-all">${esc(d.config_path)}</code>`;
+    }
     ['department','version','system','file_type'].forEach(cat => {
       const body = document.getElementById(`config-body-${cat}`);
       const count = document.getElementById(`config-${cat}-count`);
@@ -164,6 +169,7 @@ async function loadConfig() {
     });
   } catch(e) { console.error(e); }
   loadPaths();
+  loadTemplateStatus();
 }
 
 function showAddConfig(cat) {
@@ -238,6 +244,64 @@ async function savePaths() {
   }
   btn.disabled = false;
   btn.textContent = '保存路径设置';
+}
+
+// ---- 意向书评估表模板管理 ----
+async function loadTemplateStatus() {
+  try {
+    const r = await fetch('/api/config/assessment-template');
+    const d = await r.json();
+    const statusEl = document.getElementById('template-status');
+    const countEl = document.getElementById('config-template-status');
+    if (!d.success || !d.data) return;
+    if (d.data.exists) {
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '✅ 模板已上传，可用于生成需求意向书及评估表';
+      statusEl.style.background = '#f6ffed';
+      statusEl.style.borderColor = '#b7eb8f';
+      if (countEl) countEl.textContent = '✅ 已上传';
+    } else {
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '⚠️ 未上传模板。请上传 .docx 格式的 Word 模板文件';
+      statusEl.style.background = '#fffbe6';
+      statusEl.style.borderColor = '#ffe58f';
+      if (countEl) countEl.textContent = '⚠️ 未上传';
+    }
+  } catch(e) {
+    console.error('loadTemplateStatus error:', e);
+  }
+}
+
+async function uploadTemplate() {
+  const input = document.getElementById('template-upload-input');
+  if (!input.files.length) { showToast('请选择 .docx 模板文件', 'error'); return; }
+  const file = input.files[0];
+  if (!file.name.toLowerCase().endsWith('.docx')) { showToast('仅支持 .docx 格式', 'error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/config/assessment-template', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    showToast('模板上传成功', 'success');
+    input.value = '';
+    loadTemplateStatus();
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function deleteTemplate() {
+  if (!confirm('确定删除模板文件？')) return;
+  try {
+    const r = await fetch('/api/config/assessment-template', { method: 'DELETE' });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    showToast('模板已删除', 'success');
+    loadTemplateStatus();
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
 }
 
 // ---- Orders with Pagination + Filters ----
@@ -1415,6 +1479,29 @@ function toggleBatchGroup(cb) {
   }
 }
 async function deleteScheduleFromMeeting(id) { if (!confirm('确定移除？')) return; try { await api(`/api/schedules/${id}`,{method:'DELETE'}); showToast('已移除','success'); viewMeeting(document.getElementById('schedule-meeting-id').value); } catch(e) {} }
+
+/** 批量生成该会议中所有排期需求单的意向书评估表 */
+async function batchGenerateAssessments() {
+  const meetingId = document.getElementById('schedule-meeting-id').value;
+  if (!meetingId) { showToast('请先选择会议', 'error'); return; }
+  if (!confirm('确定为该会议中已排期的需求单生成意向书及评估表？已存在的将自动跳过。')) return;
+  const btn = event?.target || document.querySelector('button[onclick="batchGenerateAssessments()"]');
+  const originalText = btn?.textContent || '📝 批量生成意向书评估表';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 批量生成中...'; }
+  try {
+    const r = await fetch(`/api/meetings/${meetingId}/generate-assessments`, { method: 'POST' });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    const details = (d.data?.results || []).map(r => '  ' + (r.generated ? '✅' : '⏭️') + ' ' + r.message).join('\n');
+    showToast(`✅ ${d.message}`, 'success');
+    // 显示详细结果
+    alert(`处理结果：\n${d.message}\n\n${details}`);
+  } catch(e) {
+    showToast(e.message || '批量生成失败', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
 async function openEditScheduleModalFromMeeting(scheduleId) {
   // Lookup meeting schedule info
   const meetingId = document.getElementById('schedule-meeting-id').value;
@@ -1652,17 +1739,39 @@ async function loadFiles() {
     }
     emptyState.style.display = 'none';
 
-    // 按 file_type 分组
+    // 获取分组方式
+    const groupBy = document.getElementById('file-filter-group')?.value || 'type';
+
+    // 按分组方式分组
     const grouped = {};
     d.items.forEach(f => {
-      const type = f.file_type || '未分类';
-      if (!grouped[type]) grouped[type] = [];
-      grouped[type].push(f);
+      let key;
+      if (groupBy === 'department') {
+        key = f.department || '未指定部门';
+      } else if (groupBy === 'type') {
+        key = f.file_type || '未分类';
+      } else {
+        key = '_all';
+      }
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(f);
     });
-    const typeKeys = Object.keys(grouped).sort();
+    const groupKeys = groupBy === '' ? ['_all'] : Object.keys(grouped).sort();
 
-    groupsContainer.innerHTML = typeKeys.map(type => {
-      const files = grouped[type];
+    groupsContainer.innerHTML = groupKeys.map(key => {
+      const files = grouped[key];
+      // 部门分组时显示部门名，文件类型分组时显示类型名
+      let groupLabel, groupIcon;
+      if (groupBy === 'department') {
+        groupLabel = key === '_all' ? '全部文件' : key;
+        groupIcon = '🏢';
+      } else if (groupBy === 'type') {
+        groupLabel = key;
+        groupIcon = '📁';
+      } else {
+        groupLabel = '全部文件';
+        groupIcon = '📎';
+      }
       const fileRows = files.map(f => {
         return `<div class="file-item">
           <div class="file-info">
@@ -1681,7 +1790,7 @@ async function loadFiles() {
       return `<div class="file-group-card">
         <div class="file-group-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.group-arrow').classList.toggle('collapsed')">
           <div class="group-title">
-            📁 ${esc(type)}
+            ${groupIcon} ${esc(groupLabel)}
             <span class="group-count">${files.length} 个文件</span>
           </div>
           <span class="group-arrow">▼</span>
@@ -1712,6 +1821,7 @@ function resetFileFilter() {
   document.getElementById('file-filter-department').value = '';
   document.getElementById('file-filter-date-from').value = '';
   document.getElementById('file-filter-date-to').value = '';
+  document.getElementById('file-filter-group').value = 'type';
   filePage = 1; loadFiles();
 }
 async function deleteFileFromList(id) {

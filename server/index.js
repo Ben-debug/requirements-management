@@ -5,6 +5,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const fs = require('fs');
 const { getDatabase, initDataDir, reopenDatabase } = require('./database');
+const JSZip = require('jszip');
 const config = require('./config');
 
 const app = express();
@@ -79,6 +80,20 @@ function ensureUploadDirs() {
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 }
 ensureUploadDirs();
+
+// ---- Word 模板目录 ----
+function getTemplateDir() {
+  const customDataDir = config.getPath('data_dir');
+  if (customDataDir) {
+    const dir = path.join(customDataDir, 'templates');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  const base = process.pkg ? path.join(path.dirname(process.execPath), 'data') : path.join(ROOT_DIR, 'data');
+  const dir = path.join(base, 'templates');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 /** 递归遍历目录，返回所有文件的完整路径数组 */
 function walkDir(dir) {
@@ -973,13 +988,55 @@ app.post('/api/config/paths', (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ---- 需求意向书评估表 Word 模板管理 ----
+const TEMPLATE_FILENAME = '意向书评估表模板.docx';
+
+app.get('/api/config/assessment-template', (req, res) => {
+  try {
+    const templateDir = getTemplateDir();
+    const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
+    const exists = fs.existsSync(templatePath);
+    res.json({ success: true, data: { exists, filename: TEMPLATE_FILENAME, path: templatePath } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.post('/api/config/assessment-template', uploadTemp.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: '请选择 Word 模板文件' });
+    const name = req.file.originalname || '';
+    if (!name.toLowerCase().endsWith('.docx')) {
+      try { fs.unlinkSync(req.file.path); } catch(e) {}
+      return res.status(400).json({ success: false, message: '仅支持 .docx 格式的 Word 模板文件' });
+    }
+    const templateDir = getTemplateDir();
+    const destPath = path.join(templateDir, TEMPLATE_FILENAME);
+    try { fs.copyFileSync(req.file.path, destPath); fs.unlinkSync(req.file.path); } catch(e) {
+      return res.status(500).json({ success: false, message: '模板保存失败' });
+    }
+    res.json({ success: true, message: '模板上传成功' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+app.delete('/api/config/assessment-template', (req, res) => {
+  try {
+    const templateDir = getTemplateDir();
+    const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
+    if (fs.existsSync(templatePath)) {
+      fs.unlinkSync(templatePath);
+      res.json({ success: true, message: '模板已删除' });
+    } else {
+      res.json({ success: false, message: '模板不存在' });
+    }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 app.get('/api/config/:category', (req, res) => {
   try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 app.get('/api/config', (req, res) => {
-  try { res.json({ success: true, data: config.getAll() }); }
+  try { res.json({ success: true, data: config.getAll(), config_path: config.getConfigPath() }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -992,6 +1049,284 @@ app.delete('/api/config/:category/:label', (req, res) => {
   try { config.deleteItem(req.params.category, req.params.label); res.json({ success: true }); }
   catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+
+// ---- 生成需求意向书及评估表 ----
+
+/**
+ * 核心生成逻辑：为指定需求单生成意向书评估表
+ * @param {number} orderId - 需求单 ID
+ * @param {number|null} meetingId - 若指定，仅使用该会议的排期信息
+ * @param {object} db - 数据库连接
+ * @returns {object} { generated: boolean, file_name?: string, message: string }
+ */
+async function generateAssessmentForOrder(orderId, meetingId, db) {
+  const order = db.prepare('SELECT * FROM requirement_orders WHERE id=?').get(orderId);
+  if (!order) return { generated: false, message: '需求单不存在' };
+
+  // 检查模板是否存在
+  const templatePath = path.join(getTemplateDir(), TEMPLATE_FILENAME);
+  if (!fs.existsSync(templatePath)) return { generated: false, message: '请先上传 Word 模板（参数配置 → 模板管理）' };
+
+  // 判断是否需要跳过（已生成的检查）
+  if (meetingId) {
+    const existing = db.prepare("SELECT id, file_path FROM flow_files WHERE order_id=? AND file_type='需求意向书及评估表'").get(orderId);
+    if (existing) {
+      if (fs.existsSync(existing.file_path)) {
+        return { generated: false, message: `"${order.order_number}-${order.name}" 已存在，跳过` };
+      }
+      // 文件已被手动删除，清理无效数据库记录后重新生成
+      db.prepare("DELETE FROM flow_files WHERE id=?").run(existing.id);
+    }
+  }
+
+  // 获取需求点和排期信息（如果指定会议则仅取该会议的排期）
+  let points, schedules;
+  if (meetingId) {
+    // 仅取该会议中排期的需求点
+    points = db.prepare(`SELECT rp.* FROM requirement_points rp
+      JOIN ccb_schedules cs ON cs.point_id=rp.id
+      WHERE rp.order_id=? AND cs.meeting_id=?
+      ORDER BY rp.point_number`).all(orderId, meetingId);
+    schedules = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date
+      FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id
+      WHERE cs.order_id=? AND cs.meeting_id=?`).all(orderId, meetingId);
+  } else {
+    points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(orderId);
+    schedules = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date
+      FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id
+      WHERE cs.order_id=?`).all(orderId);
+  }
+
+  // 如果指定了会议但没有排期数据，跳过
+  if (meetingId && (!schedules || !schedules.length)) {
+    return { generated: false, message: `"${order.order_number}-${order.name}" 在该会议中无排期，跳过` };
+  }
+
+  // 构建替换数据
+  const data = {
+    '需求单编号': order.order_number || '',
+    '需求单名称': order.name || '',
+    '提出背景': order.background || '',
+  };
+
+  // 处理排期相关字段
+  if (schedules && schedules.length > 0) {
+    const systemsSet = new Set();
+    const versionsSet = new Set();
+    schedules.forEach(s => {
+      if (s.system) s.system.split(',').filter(Boolean).forEach(sys => systemsSet.add(sys.trim()));
+      if (s.version) versionsSet.add(s.version.trim());
+    });
+    data['涉及系统'] = Array.from(systemsSet).join('、') || '';
+    data['排期版本'] = Array.from(versionsSet).join('、') || '';
+    const sorted = [...schedules].sort((a, b) => (a.meeting_date < b.meeting_date) ? 1 : (a.meeting_date > b.meeting_date ? -1 : 0));
+    data['会议日期'] = sorted[0].meeting_date || '';
+  } else {
+    data['涉及系统'] = '';
+    data['排期版本'] = '';
+    data['会议日期'] = '';
+  }
+
+  // 需求点描述（多段落）
+  const pointDescriptions = points.filter(p => p.description).map(p => p.description.trim());
+
+  // 生成输出文件名
+  const safeName = (order.name || '未命名').replace(/[<>:"/\\|?*]/g, '_');
+  const outputFileName = `【需求意向书及评估表】${order.order_number}-${safeName}.docx`;
+
+  // 生成文档
+  const flowDir = getFlowFileDir();
+  if (!fs.existsSync(flowDir)) fs.mkdirSync(flowDir, { recursive: true });
+
+  // 防重名
+  let destPath = path.join(flowDir, outputFileName);
+  let counter = 1;
+  while (fs.existsSync(destPath)) {
+    const ext = path.extname(outputFileName);
+    const base = path.basename(outputFileName, ext);
+    destPath = path.join(flowDir, `${base}(${counter++})${ext}`);
+  }
+
+  await generateAssessmentDoc(templatePath, destPath, data, pointDescriptions);
+
+  // 记录到 flow_files 表
+  const fileType = '需求意向书及评估表';
+  const r = db.prepare('INSERT INTO flow_files (order_id,file_type,original_name,stored_name,file_path) VALUES (?,?,?,?,?)')
+    .run(orderId, fileType, outputFileName, path.basename(destPath), destPath);
+
+  return { generated: true, file_name: outputFileName, message: `"${order.order_number}-${order.name}" 生成成功` };
+}
+
+// 按订单生成（保留，用于手动触发生成）
+app.post('/api/orders/:id/generate-assessment', (req, res) => {
+  (async () => {
+    try {
+      const db = getDatabase();
+      const orderId = parseInt(req.params.id);
+      const result = await generateAssessmentForOrder(orderId, null, db);
+      if (!result.generated) return res.status(400).json({ success: false, message: result.message });
+      res.json({ success: true, message: '生成成功', data: { file_name: result.file_name } });
+    } catch (err) {
+      console.error('生成文档失败:', err);
+      res.status(500).json({ success: false, message: '生成失败：' + err.message });
+    }
+  })();
+});
+
+// 按会议批量生成（排期会议后使用）
+app.post('/api/meetings/:meetingId/generate-assessments', (req, res) => {
+  (async () => {
+    try {
+      const db = getDatabase();
+      const meetingId = parseInt(req.params.meetingId);
+
+      // 获取该会议中所有排期的订单 ID（去重）
+      const orderRows = db.prepare('SELECT DISTINCT order_id FROM ccb_schedules WHERE meeting_id=?').all(meetingId);
+      if (!orderRows || !orderRows.length) return res.status(400).json({ success: false, message: '该会议中暂无排期数据' });
+
+      const results = [];
+      for (const row of orderRows) {
+        const result = await generateAssessmentForOrder(row.order_id, meetingId, db);
+        results.push(result);
+      }
+
+      const generated = results.filter(r => r.generated).length;
+      const skipped = results.filter(r => !r.generated).length;
+
+      res.json({
+        success: true,
+        message: `处理完成：成功生成 ${generated} 个，跳过 ${skipped} 个`,
+        data: { results, generated, skipped }
+      });
+    } catch (err) {
+      console.error('批量生成文档失败:', err);
+      res.status(500).json({ success: false, message: '批量生成失败：' + err.message });
+    }
+  })();
+});
+
+// ---- Word 模板处理工具函数 ----
+
+/** XML 转义 */
+function xmlEscape(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+/**
+ * 在 docx XML 中处理多段落占位符替换（如 [需求点描述]）
+ * 找到包含该占位符的 <w:p>，当 values 含多个元素时复制为多个段落
+ */
+function expandMultiParagraphInXml(xml, placeholder, values) {
+  if (!values || values.length === 0) {
+    // 匹配单个 <w:p> 内含 [占位符] 的段落，不会跨越 </w:p> 边界
+    const escPH = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return xml.replace(new RegExp(`<w:p[^>]*>(?:(?!<\\/w:p>)[\\s\\S])*?\\[${escPH}\\](?:(?!<\\/w:p>)[\\s\\S])*?<\\/w:p>`, 'g'), '');
+  }
+  if (values.length === 1) {
+    return xml.split(`[${placeholder}]`).join(xmlEscape(values[0]));
+  }
+
+  const escapeRegex = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pRegex = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  let result = '';
+  let lastIdx = 0;
+  let match;
+
+  while ((match = pRegex.exec(xml)) !== null) {
+    if (match[0].includes(`[${placeholder}]`)) {
+      result += xml.slice(lastIdx, match.index);
+      const origP = match[0];
+
+      const pPrMatch = origP.match(/<w:pPr[\s\S]*?<\/w:pPr>/);
+      const pPr = pPrMatch ? pPrMatch[0] : '';
+
+      const firstRunMatch = origP.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/);
+      const runTemplate = firstRunMatch ? firstRunMatch[0] : '<w:r><w:t></w:t></w:r>';
+
+      const newRun = runTemplate.replace(/<w:t[^>]*>[\s\S]*?<\/w:t>/, () => {
+        return '<w:t xml:space="preserve">__VAL__</w:t>';
+      });
+
+      const newParagraphs = values.map(v => {
+        const escaped = xmlEscape(v);
+        return `<w:p>${pPr}${newRun.replace('__VAL__', escaped)}</w:p>`;
+      });
+      result += newParagraphs.join('');
+      lastIdx = match.index + match[0].length;
+    }
+  }
+  result += xml.slice(lastIdx);
+  return result;
+}
+
+/**
+ * 合并同一段落内相邻的 <w:t> 文本，确保占位符不被拆散
+ */
+function coalesceTextRuns(xml, placeholderPattern) {
+  const regex = placeholderPattern || /\[[一-鿿\w]+\]/;
+  return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, pMatch => {
+    // 提取所有 <w:t> 的文本内容（不含 XML 结构空白）
+    const tRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    const runs = [];
+    let tMatch;
+    while ((tMatch = tRegex.exec(pMatch)) !== null) {
+      runs.push(tMatch[1]);
+    }
+    const combined = runs.join('');
+    if (!regex.test(combined)) return pMatch;
+    // 只要合并后的文本包含占位符模式，就合并所有 run
+    // 解决 Word 将 [需求单编号] 拆成 [需求 + 单编号] 多个 run 的问题
+    const pPrMatch = pMatch.match(/<w:pPr[\s\S]*?<\/w:pPr>/);
+    const pPr = pPrMatch ? pPrMatch[0] : '';
+    const rPrMatch = pMatch.match(/<w:rPr[\s\S]*?<\/w:rPr>/);
+    const rPr = rPrMatch ? rPrMatch[0] : '';
+    return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${combined}</w:t></w:r></w:p>`;
+  });
+}
+
+/**
+ * 读取 Word 模板，替换占位符，生成新的 docx 文件
+ */
+async function generateAssessmentDoc(templatePath, outputPath, simpleData, multiParagraphValues) {
+  const templateBuf = fs.readFileSync(templatePath);
+  const zip = await JSZip.loadAsync(templateBuf);
+
+  const xmlFiles = ['word/document.xml'];
+  for (const name of Object.keys(zip.files)) {
+    if (/^word\/(header|footer)\d+\.xml$/.test(name)) {
+      xmlFiles.push(name);
+    }
+  }
+
+  const phKeys = Object.keys(simpleData).filter(k => k !== '需求点描述');
+  phKeys.push('需求点描述');
+  const phPattern = new RegExp(phKeys.map(k => `\\[${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`).join('|'));
+
+  for (const xmlPath of xmlFiles) {
+    const file = zip.file(xmlPath);
+    if (!file) continue;
+    let content = await file.async('string');
+
+    content = coalesceTextRuns(content, phPattern);
+
+    if (multiParagraphValues !== undefined) {
+      content = expandMultiParagraphInXml(content, '需求点描述', multiParagraphValues);
+      delete simpleData['需求点描述'];
+    }
+
+    for (const [key, value] of Object.entries(simpleData)) {
+      if (value == null) continue;
+      const placeholder = `[${key}]`;
+      const escaped = xmlEscape(String(value));
+      content = content.split(placeholder).join(escaped);
+    }
+
+    zip.file(xmlPath, content);
+  }
+
+  const outData = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  fs.writeFileSync(outputPath, outData);
+}
 
 // ---- 升级日志 ----
 app.get('/api/upgrade-logs', (req, res) => {

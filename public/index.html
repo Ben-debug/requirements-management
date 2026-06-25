@@ -146,6 +146,12 @@
     <input type="date" id="file-filter-date-to" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
     <button class="btn btn-sm btn-primary" onclick="applyFileFilter()">🔍 查询</button>
     <button class="btn btn-sm" onclick="resetFileFilter()">↻ 重置</button>
+    <span style="font-size:12px;color:#999">分组</span>
+    <select id="file-filter-group" onchange="applyFileFilter()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="type">按文件类型</option>
+      <option value="department">按提出部门</option>
+      <option value="">不分组</option>
+    </select>
   </div>
   <div class="file-group-container" id="files-container">
     <div id="files-empty-state" style="display:none"><div class="empty-state"><div class="icon">📎</div><p>暂无流转文件</p></div></div>
@@ -157,6 +163,7 @@
 <!-- Config Page -->
 <div id="page-config" class="page-content" style="display:none">
   <div class="page-header"><h2>⚙️ 参数配置</h2><p>管理各类参数的可选值，折叠式布局</p></div>
+  <div id="config-file-path" style="padding:10px 16px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px;margin-bottom:12px;font-size:13px;color:#666"></div>
   <div class="config-accordion">
     <div class="config-group">
       <div class="config-group-header" onclick="toggleConfigGroup(this)">
@@ -228,8 +235,24 @@
 	        <button class="btn btn-primary" onclick="savePaths()" title="保存路径设置。修改 data 目录需重启服务生效，文件目录修改立即生效">保存路径设置</button>
 	      </div>
     </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">📝 意向书评估表模板</span>
+        <div><span id="config-template-status" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-template">
+        <p style="font-size:13px;color:#999;margin-bottom:12px">上传 Word 模板文件（.docx），用于自动生成需求意向书及评估表。模板中使用 [需求单编号]、[需求单名称]、[会议日期]、[涉及系统]、[排期版本]、[提出背景]、[需求点描述] 作为占位符。</p>
+        <div id="template-status" style="padding:10px 14px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;margin-bottom:12px;font-size:14px;display:none"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="template-upload-input" accept=".docx" style="flex:1;min-width:200px;padding:6px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
+          <button class="btn btn-primary" onclick="uploadTemplate()" title="上传 .docx 格式的 Word 模板">📤 上传模板</button>
+          <button class="btn btn-danger" onclick="deleteTemplate()" title="删除已上传的模板">🗑️ 删除模板</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
+
 
 <!-- Upgrade Logs: removed -->
 </main>
@@ -274,7 +297,9 @@
       <div class="detail-tab-item" data-dtab="files" onclick="switchDetailTab('files')">📎 流转文件</div>
     </div>
     <div id="dtab-points" class="detail-tab-content" style="display:block">
-      <div style="margin-bottom:12px"><button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button></div>
+      <div style="margin-bottom:12px">
+        <button class="btn btn-primary" onclick="showAddPoint()" title="为当前需求单添加一个需求点。如需拆分子单，填写子单批次号">＋ 添加</button>
+      </div>
       <div id="detail-points" class="points-list"></div>
     </div>
     <div id="dtab-files" class="detail-tab-content" style="display:none">
@@ -349,7 +374,11 @@
       <p style="font-size:13px;color:#999;margin-bottom:12px">勾选需求点，逐行选择系统和版本后保存</p>
       <div id="schedule-batch-table" style="border:1px solid #d9d9d9;border-radius:6px;padding:8px;overflow-x:auto"><div class="loading">加载中...</div></div>
     </div>
-    <div class="detail-section"><h4>已排期列表</h4><div id="schedule-list"></div></div>
+    <div class="detail-section"><h4>已排期列表</h4>
+      <div style="margin-bottom:10px">
+        <button class="btn btn-success btn-sm" onclick="batchGenerateAssessments()" title="为该会议中已排期的每个需求单生成意向书及评估表，已存在的自动跳过">📝 批量生成意向书评估表</button>
+      </div>
+      <div id="schedule-list"></div></div>
     <input type="hidden" id="schedule-meeting-id">
   </div>
 </div></div>

@@ -49,8 +49,7 @@ function load() {
     if (changed) save();
     return configCache;
   } catch (e) {
-    configCache = structuredClone(defaults);
-    return configCache;
+    return structuredClone(defaults);
   }
 }
 
@@ -108,4 +107,8 @@ function setConfigDir(dir) {
   configCache = null;  // 强制下次 load() 重新读取新路径
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load, setConfigDir };
+function getConfigPath() {
+  return configPath();
+}
+
+module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load, setConfigDir, getConfigPath };

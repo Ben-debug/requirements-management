@@ -7,5 +7,6 @@ Release/
 *.db-shm
 *.db-wal
 package-lock.json
+*.zip
 .DS_Store
 Thumbs.db

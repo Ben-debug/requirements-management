@@ -16,6 +16,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Micr
 .top-nav[data-page="meetings"] .nav-item.active{border-bottom-color:#52c41a}
 .top-nav[data-page="files"] .nav-item.active{border-bottom-color:#fa8c16}
 .top-nav[data-page="config"] .nav-item.active{border-bottom-color:#722ed1}
+.top-nav[data-page="specs"] .nav-item.active{border-bottom-color:#13c2c2}
 
 /* 子Tab跟随主页面颜色 */
 #page-meetings .tab-item.active{color:#52c41a;border-bottom-color:#52c41a}

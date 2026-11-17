@@ -8,8 +8,11 @@ async function loadMeetings() {
     const meetings = (await api('/api/meetings')).data;
     const c = document.getElementById('meetings-list');
     if (!meetings.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无CCB会议</p></div>'; return; }
-    c.innerHTML = meetings.map(m =>
-      `<div class="schedule-card">
+    c.innerHTML = meetings.map(m => {
+      const open = m.file_name
+        ? fileOpenInfo({ id: m.id, file_name: m.file_name }, `/api/meetings/${m.id}/file`)
+        : null;
+      return `<div class="schedule-card">
         <div class="sched-header">
           <div class="sched-title">${esc(m.meeting_name)}</div>
           <div class="action-group">
@@ -19,9 +22,9 @@ async function loadMeetings() {
           </div>
         </div>
         <div class="sched-meta">日期: ${m.meeting_date}${m.notes ? ' | ' + esc(m.notes) : ''}</div>
-        ${m.file_name ? '<div class="sched-tags"><span class="sched-tag">📎 <a href="/api/meetings/' + m.id + '/file/download" style="color:#333;text-decoration:none" target="_blank" title="下载纪要文件">' + esc(m.file_name) + '</a></span></div>' : ''}
-      </div>`
-    ).join('');
+        ${open ? `<div class="sched-tags"><span class="sched-tag">📎 <a href="${open.url}" style="color:#333;text-decoration:none" target="_blank" title="${open.title}">${esc(m.file_name)}</a></span>${open.previewable ? `<a href="${open.downloadUrl}" target="_blank" style="font-size:12px;color:#1890ff" title="下载纪要文件">📥 下载</a>` : ''}</div>` : ''}
+      </div>`;
+    }).join('');
   } catch (e) {}
 }
 
@@ -99,8 +102,9 @@ async function refreshMeetingFileDisplay(meetingId) {
     const d = await api(`/api/meetings/${meetingId}`);
     const data = d.data;
     if (data.file_name) {
+      const open = fileOpenInfo({ id: meetingId, file_name: data.file_name }, `/api/meetings/${meetingId}/file`);
       container.style.display = 'block';
-      container.innerHTML = `📎 当前文件：<a href="/api/meetings/${meetingId}/file/download" target="_blank" style="color:#1890ff;font-weight:500">${esc(data.file_name)}</a>`;
+      container.innerHTML = `📎 当前文件：<a href="${open.url}" target="_blank" style="color:#1890ff;font-weight:500" title="${open.title}">${esc(data.file_name)}</a>${open.previewable ? ` <a href="${open.downloadUrl}" target="_blank" style="font-size:12px;color:#1890ff" title="下载纪要文件">📥 下载</a>` : ''}`;
     } else {
       container.style.display = 'none';
       container.innerHTML = '';

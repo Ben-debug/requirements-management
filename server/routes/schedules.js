@@ -13,12 +13,13 @@ module.exports = function (app) {
       const db = getDatabase();
       const { schedules } = req.body;
       if (!schedules || !schedules.length) return res.status(400).json({ success: false, message: '请选择排期' });
-      const ins = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project) VALUES (?,?,?,?,?,?)');
+      const ins = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)');
       const upd = db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?');
       const updBatch = db.prepare('UPDATE requirement_points SET sub_batch=? WHERE id=?');
       db.transaction(() => {
         schedules.forEach(s => {
-          ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version, s.is_project || 0);
+          const isProject = s.is_project || 0;
+          ins.run(req.params.meetingId, s.order_id, s.point_id, s.system, s.version, isProject, isProject ? (s.project_name || null) : null);
           upd.run(s.system, s.version, s.point_id);
           if (s.sub_batch) updBatch.run(s.sub_batch, s.point_id);
         });
@@ -31,8 +32,9 @@ module.exports = function (app) {
   app.post('/api/meetings/:meetingId/schedules', (req, res) => {
     try {
       const db = getDatabase();
-      const { order_id, point_id, system, version, is_project } = req.body;
-      db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project) VALUES (?,?,?,?,?,?)').run(req.params.meetingId, order_id, point_id, system, version, is_project || 0);
+      const { order_id, point_id, system, version, is_project, project_name } = req.body;
+      const isProject = is_project || 0;
+      db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)').run(req.params.meetingId, order_id, point_id, system, version, isProject, isProject ? (project_name || null) : null);
       db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, point_id);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -42,14 +44,16 @@ module.exports = function (app) {
   app.put('/api/schedules/:id', (req, res) => {
     try {
       const db = getDatabase();
-      const { system, version, meeting_id, is_project } = req.body;
+      const { system, version, meeting_id, is_project, project_name } = req.body;
       const schedule = db.prepare('SELECT * FROM ccb_schedules WHERE id=?').get(req.params.id);
       if (!schedule) return res.status(404).json({ success: false });
       const pi = is_project !== undefined ? (is_project || 0) : schedule.is_project;
+      // 取消立项时清空项目名；已立项时优先用本次传入值，未传则保留原值
+      const pn = pi ? (project_name !== undefined ? (project_name || null) : schedule.project_name) : null;
       if (meeting_id && meeting_id != schedule.meeting_id) {
-        db.prepare('UPDATE ccb_schedules SET meeting_id=?, system=?, version=?, is_project=? WHERE id=?').run(meeting_id, system, version, pi, req.params.id);
+        db.prepare('UPDATE ccb_schedules SET meeting_id=?, system=?, version=?, is_project=?, project_name=? WHERE id=?').run(meeting_id, system, version, pi, pn, req.params.id);
       } else {
-        db.prepare('UPDATE ccb_schedules SET system=?, version=?, is_project=? WHERE id=?').run(system, version, pi, req.params.id);
+        db.prepare('UPDATE ccb_schedules SET system=?, version=?, is_project=?, project_name=? WHERE id=?').run(system, version, pi, pn, req.params.id);
       }
       db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, schedule.point_id);
       res.json({ success: true });

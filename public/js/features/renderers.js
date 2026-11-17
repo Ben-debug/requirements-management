@@ -31,9 +31,31 @@ function renderPagination(containerId, r, gotoFn) {
   if (sel) sel.value = r.pageSize || 10;
 }
 
+// ---- 文件打开方式：可预览类型在浏览器中打开，其余类型下载 ----
+// base 为资源基础路径，如 /api/files/6、/api/meetings/3/file、/api/specs/5
+// 省略时默认按流转文件处理（兼容原有调用）
+function fileOpenInfo(f, base) {
+  var baseUrl = base || ('/api/files/' + f.id);
+  var name = f.original_name || f.file_name || f.name || '';
+  var ext = (name.split('.').pop() || '').toLowerCase();
+  var previewable = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt'].indexOf(ext) !== -1;
+  return {
+    previewable: previewable,
+    url: baseUrl + (previewable ? '/preview' : '/open'),
+    downloadUrl: baseUrl + '/download',
+    title: previewable ? '在浏览器中打开' : '本机打开所在目录 / 远程下载'
+  };
+}
+
 // ---- 文件项 HTML ----
 function fileItemHtml(f) {
-  return '<div class="file-item"><div class="file-info"><span class="file-type">' + esc(f.file_type) + '</span><span><a href="/api/files/' + f.id + '/download" style="color:#333;text-decoration:none" title="点击下载" target="_blank">' + esc(f.original_name) + '</a></span></div><div class="action-group"><a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="下载文件">📥 下载</a><button class="btn btn-sm btn-danger" onclick="deleteFile(' + f.id + ')">删除</button></div></div>';
+  var filePath = f.file_path || '';
+  var pathHtml = filePath ? '<div style="font-size:11px;color:#bbb;margin-top:2px;word-break:break-all" title="本地路径">📂 ' + esc(filePath) + '</div>' : '';
+  var open = fileOpenInfo(f);
+  var previewBtn = open.previewable
+    ? '<a class="btn btn-sm" href="/api/files/' + f.id + '/preview" target="_blank" title="在浏览器中打开">👁 预览</a>'
+    : '';
+  return '<div class="file-item"><div class="file-info"><span class="file-type">' + esc(f.file_type) + '</span><span><a href="' + open.url + '" style="color:#333;text-decoration:none" title="' + open.title + '" target="_blank">' + esc(f.original_name) + '</a>' + pathHtml + '</span></div><div class="action-group">' + previewBtn + '<a class="btn btn-sm" href="/api/files/' + f.id + '/download" target="_blank" title="下载文件">📥 下载</a><button class="btn btn-sm btn-danger" onclick="deleteFile(' + f.id + ')">删除</button></div></div>';
 }
 
 // ---- 排期卡片渲染 ----

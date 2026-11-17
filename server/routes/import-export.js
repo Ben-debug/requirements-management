@@ -26,7 +26,7 @@ module.exports = function (app) {
   app.get('/api/export/filtered', (req, res) => {
     try {
       const db = getDatabase();
-      const { department, keyword, date_from, date_to, is_project } = req.query;
+      const { department, keyword, date_from, date_to, is_project, meeting_name } = req.query;
       let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
       const params = [];
       if (department) { sql += ' AND department=?'; params.push(department); }
@@ -37,6 +37,10 @@ module.exports = function (app) {
         sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
       } else if (is_project === '0') {
         sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+      }
+      if (meeting_name) {
+        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name LIKE ?)";
+        params.push(`%${meeting_name}%`);
       }
       sql += ' ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)';
       const orders = db.prepare(sql).all(...params);

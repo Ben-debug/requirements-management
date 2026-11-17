@@ -34,6 +34,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Micr
 .tab-item{padding:10px 20px;cursor:pointer;font-size:14px;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s;user-select:none}
 .tab-item:hover{color:#1890ff}
 .tab-item.active{color:#1890ff;border-bottom-color:#1890ff;font-weight:600}
+
+/* 流转文件类型 tab + 回收站角标 */
+.file-type-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.file-type-tabs::-webkit-scrollbar{display:none}
+.file-type-tabs .tab-item{white-space:nowrap}
+.tab-count{font-size:11px;color:#999;margin-left:4px}
+.tab-item.active .tab-count{color:#1890ff}
+.badge-red{display:inline-block;min-width:16px;padding:0 5px;border-radius:8px;background:#ff4d4f;color:#fff;font-size:11px;line-height:16px;text-align:center;margin-left:4px}
+.trash-entry{margin:6px 0;color:#ff4d4f;border-color:#ff4d4f}
+.trash-entry:hover{background:#fff2f0;border-color:#ff4d4f;color:#ff4d4f}
 /* Detail modal tabs */
 .detail-tab-bar{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8}
 .detail-tab-item{padding:8px 16px;cursor:pointer;font-size:13px;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s;user-select:none}
@@ -368,3 +378,246 @@ textarea.form-control{min-height:80px;resize:vertical}
   border-radius: 3px;
   white-space: nowrap;
 }
+
+/* ============================================================
+   需规树状视图样式
+   ============================================================ */
+.spec-tree {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  overflow: hidden;
+}
+.tree-node {
+  user-select: none;
+}
+.tree-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #f5f5f5;
+}
+.tree-node-header:hover {
+  background: #f0faff;
+}
+.tree-node-header[data-level="system"]:hover {
+  background: #f6ffed;
+}
+.tree-node-header[data-level="order"]:hover {
+  background: #fff7e6;
+}
+.tree-node-header[data-level="point"]:hover {
+  background: #f0f5ff;
+}
+.tree-doc > .tree-node-header {
+  background: #fafafa;
+  border-left: 3px solid #13c2c2;
+}
+.tree-system > .tree-node-header {
+  padding-left: 36px;
+  border-left: 3px solid #52c41a;
+}
+.tree-order > .tree-node-header {
+  padding-left: 60px;
+  border-left: 3px solid #fa8c16;
+}
+.tree-point > .tree-node-header {
+  padding-left: 84px;
+  border-left: 3px solid #1890ff;
+  cursor: default;
+  border-bottom: none;
+}
+.tree-arrow {
+  display: inline-block;
+  width: 16px;
+  font-size: 10px;
+  color: #999;
+  text-align: center;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.tree-arrow-empty {
+  visibility: hidden;
+}
+.tree-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.tree-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-doc .tree-label {
+  font-size: 14px;
+}
+.tree-desc {
+  font-size: 12px;
+  color: #666;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.tree-meta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tree-count {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+}
+.tree-empty-hint {
+  padding: 12px 36px;
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+}
+.tree-children {
+  overflow: hidden;
+}
+
+/**
+ * 树状视图展开/收起控制按钮组
+ */
+.tree-controls {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.tree-controls button {
+  padding: 3px 8px;
+  font-size: 12px;
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tree-controls button:hover {
+  border-color: #13c2c2;
+  color: #13c2c2;
+}
+
+/* 需规文件夹结构提示条 */
+.spec-folder-notice {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 6px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.8;
+}
+.spec-folder-notice code {
+  background: #fff3e0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+  color: #d46b08;
+}
+.spec-folder-notice .spec-folder-example {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  background: #f0f0f0;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #888;
+  font-family: monospace;
+}
+
+/* 树状 — 版本层头部 */
+.tree-version > .tree-node-header {
+  background: #fafafa;
+  border-left: 4px solid #722ed1;
+  border-bottom: 2px solid #e8e8e8;
+  padding: 10px 14px;
+}
+.tree-version > .tree-node-header:hover {
+  background: #f9f0ff;
+}
+.tree-version-label {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #1a1a1a;
+}
+
+/* 树状节点图标按钮（🔗匹配/🗑️删除） */
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.4;
+  transition: opacity 0.2s, background 0.2s;
+  line-height: 1;
+}
+.tree-node-header:hover .btn-icon {
+  opacity: 0.7;
+}
+.btn-icon:hover {
+  opacity: 1 !important;
+  background: rgba(0,0,0,0.06);
+}
+.btn-icon-danger:hover {
+  background: #fff2f0;
+}
+
+/* 树状 — 会议纪要层 */
+.tree-meetings > .tree-node-header {
+  padding-left: 0;
+  border-left: 3px solid #fa8c16;
+  background: #fffbe6;
+  margin-top: 4px;
+}
+.tree-meetings > .tree-node-header:hover {
+  background: #fff7cc;
+}
+.tree-meeting > .tree-node-header {
+  padding-left: 36px;
+  border-left: 2px solid #ffd591;
+}
+.tree-meeting > .tree-node-header .btn-icon {
+  opacity: 0.3;
+}
+.tree-meeting > .tree-node-header:hover .btn-icon {
+  opacity: 0.7;
+}
+
+/* 树状 — 文件下载链接 / 需求单跳转链接 */
+/* 回收站样式 */
+.trash-item {
+  opacity: 0.85;
+  border-left: 3px solid #ff4d4f;
+}
+.trash-item:hover {
+  opacity: 1;
+  background: #fff2f0;
+}
+
+a.file-link, a.order-link {
+  color: #1890ff;
+  text-decoration: none;
+}
+a.file-link:hover, a.order-link:hover {
+  color: #40a9ff;
+  text-decoration: underline;
+}
+/* 文档查询列表：文件名与其他列（12px）字号对齐 */
+.query-row .file-link{font-size:12px}

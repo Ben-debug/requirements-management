@@ -27,7 +27,7 @@ module.exports = function (app) {
   app.get('/api/orders', (req, res) => {
     try {
       const db = getDatabase();
-      const { page = 1, pageSize = 10, department, keyword, date_from, date_to, is_project, sort = 'created_at', order = 'desc', group_by } = req.query;
+      const { page = 1, pageSize = 10, department, keyword, date_from, date_to, is_project, is_scheduled, meeting_name, sort = 'created_at', order = 'desc', group_by } = req.query;
       let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
       const params = [];
       if (department) { sql += ' AND department=?'; params.push(department); }
@@ -38,6 +38,18 @@ module.exports = function (app) {
         sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
       } else if (is_project === '0') {
         sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
+      }
+      if (is_scheduled === '1') {
+        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id)";
+      } else if (is_scheduled === '2') {
+        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id)";
+        sql += " AND EXISTS (SELECT 1 FROM requirement_points rp WHERE rp.order_id=requirement_orders.id AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs WHERE cs.point_id=rp.id))";
+      } else if (is_scheduled === '0') {
+        sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id)";
+      }
+      if (meeting_name) {
+        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name LIKE ?)";
+        params.push(`%${meeting_name}%`);
       }
       // 排序白名单
       const sortFields = { 'created_at': 'created_at', 'order_number': 'order_number', 'propose_date': 'propose_date', 'department': 'department', 'name': 'name' };
@@ -78,7 +90,8 @@ module.exports = function (app) {
       }
 
       const departments = config.getCategory('department');
-      res.json({ success: true, ...result, grouped, filters: { departments } });
+      const meetings = db.prepare('SELECT DISTINCT meeting_name FROM ccb_meetings ORDER BY meeting_name').all().map(m => m.meeting_name);
+      res.json({ success: true, ...result, grouped, filters: { departments, meetings } });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
@@ -89,62 +102,109 @@ module.exports = function (app) {
       const order = db.prepare('SELECT * FROM requirement_orders WHERE id=?').get(req.params.id);
       if (!order) return res.status(404).json({ success: false });
       const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY id').all(req.params.id);
-      const files = db.prepare('SELECT * FROM flow_files WHERE order_id=? ORDER BY id').all(req.params.id);
+      const files = db.prepare('SELECT * FROM flow_files WHERE order_id=? AND deleted_at IS NULL ORDER BY id').all(req.params.id);
       const schedules = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=?`).all(req.params.id);
       const pointsWithSchedule = points.map(p => {
         const s = schedules.find(x => x.point_id === p.id);
-        return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null, meeting_date: s ? s.meeting_date : null, schedule_id: s ? s.id : null, meeting_id: s ? s.meeting_id : null };
+        return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null, meeting_date: s ? s.meeting_date : null, schedule_id: s ? s.id : null, meeting_id: s ? s.meeting_id : null, is_project: s ? s.is_project : 0, project_name: s ? s.project_name : null };
       });
       res.json({ success: true, data: { ...order, points: pointsWithSchedule, files, schedules } });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // ---- 文件自动扫描 ----
+  // ---- 文件自动扫描 / 刷新关联 ----
   app.get('/api/orders/:id/scan-files', (req, res) => {
     try {
       const db = getDatabase();
       const orderId = parseInt(req.params.id);
       const order = db.prepare('SELECT id, order_number FROM requirement_orders WHERE id=?').get(orderId);
       if (!order) return res.status(404).json({ success: false, message: '需求单不存在' });
-      const serviceDir = getServiceOrderDir();
-      if (!fs.existsSync(serviceDir)) return res.json({ success: true, data: [], count: 0 });
+
+      // ---- 刷新模式：先清理已失效的记录（文件已被手动删除） ----
+      let cleaned = 0;
+      if (req.query.refresh === '1') {
+        const staleRecords = db.prepare('SELECT id, file_path FROM flow_files WHERE order_id=? AND deleted_at IS NULL').all(orderId);
+        const toDelete = staleRecords.filter(r => !fs.existsSync(r.file_path));
+        if (toDelete.length) {
+          const delStmt = db.prepare('DELETE FROM flow_files WHERE id=?');
+          db.transaction(() => {
+            for (const r of toDelete) { delStmt.run(r.id); }
+          })();
+          cleaned = toDelete.length;
+        }
+      }
+
       const existing = new Set(
-        db.prepare('SELECT file_path FROM flow_files WHERE order_id=?').all(orderId).map(r => path.resolve(r.file_path))
+        db.prepare('SELECT file_path FROM flow_files WHERE order_id=? AND deleted_at IS NULL').all(orderId).map(r => path.resolve(r.file_path))
       );
       const validSubBatches = new Set(
         db.prepare('SELECT DISTINCT sub_batch FROM requirement_points WHERE order_id=? AND sub_batch IS NOT NULL AND sub_batch != ?').all(orderId, '').map(r => r.sub_batch)
       );
-      const allFiles = walkDir(serviceDir);
+
       const discovered = [];
       const orderNum = order.order_number;
-      for (const filePath of allFiles) {
-        if (existing.has(path.resolve(filePath))) continue;
-        const fileName = path.basename(filePath);
-        const ext = path.extname(fileName).toLowerCase();
-        let fileType, matchStr;
-        const bracketEnd = fileName.indexOf('】');
-        if (bracketEnd !== -1) {
-          matchStr = fileName.substring(bracketEnd + 1);
-          if (!matchStr.startsWith(orderNum)) continue;
-          const typeMatch = fileName.match(/【([^】]+)】/);
-          fileType = typeMatch ? typeMatch[1] : '未知';
-        } else if (ext === '.pdf') {
-          const nameWithoutExt = path.basename(fileName, ext);
-          if (!nameWithoutExt.startsWith(orderNum)) continue;
-          matchStr = nameWithoutExt;
-          fileType = '需求服务单';
-        } else {
-          continue;
+
+      // ---- 扫描服务单目录（任意文件类型、任意格式） ----
+      const serviceDir = getServiceOrderDir();
+      if (fs.existsSync(serviceDir)) {
+        for (const filePath of walkDir(serviceDir)) {
+          if (existing.has(path.resolve(filePath))) continue;
+          const fileName = path.basename(filePath);
+          const ext = path.extname(fileName).toLowerCase();
+          let fileType, matchStr;
+          const bracketEnd = fileName.indexOf('】');
+          if (bracketEnd !== -1) {
+            matchStr = fileName.substring(bracketEnd + 1);
+            if (!matchStr.startsWith(orderNum)) continue;
+            const typeMatch = fileName.match(/【([^】]+)】/);
+            fileType = typeMatch ? typeMatch[1] : '未知';
+          } else if (ext === '.pdf') {
+            const nameWithoutExt = path.basename(fileName, ext);
+            if (!nameWithoutExt.startsWith(orderNum)) continue;
+            matchStr = nameWithoutExt;
+            fileType = '需求服务单';
+          } else {
+            continue;
+          }
+          let subBatch = null;
+          const restAfterOrder = matchStr.substring(orderNum.length);
+          const subBatchMatch = restAfterOrder.match(/^-(\d+)-\s*/);
+          if (subBatchMatch) {
+            const extracted = subBatchMatch[1];
+            if (validSubBatches.has(extracted)) subBatch = extracted;
+          }
+          discovered.push({ original_name: fileName, stored_name: fileName, file_path: filePath, file_type: fileType, sub_batch: subBatch });
         }
-        let subBatch = null;
-        const restAfterOrder = matchStr.substring(orderNum.length);
-        const subBatchMatch = restAfterOrder.match(/^-(\d+)-\s*/);
-        if (subBatchMatch) {
-          const extracted = subBatchMatch[1];
-          if (validSubBatches.has(extracted)) subBatch = extracted;
-        }
-        discovered.push({ original_name: fileName, stored_name: fileName, file_path: filePath, file_type: fileType, sub_batch: subBatch });
       }
+
+      // ---- 扫描流转文件目录（仅 PDF，仅匹配指定文件类型） ----
+      const flowDir = getFlowFileDir();
+      if (fs.existsSync(flowDir)) {
+        for (const filePath of walkDir(flowDir)) {
+          if (existing.has(path.resolve(filePath))) continue;
+          const fileName = path.basename(filePath);
+          const ext = path.extname(fileName).toLowerCase();
+          if (ext !== '.pdf') continue;
+
+          // 必须严格以 【需求意向书及评估表】 或 【项目需求书】 开头
+          const match = fileName.match(/^【(需求意向书及评估表|项目需求书)】(.+)$/);
+          if (!match) continue;
+          const fileType = match[1];
+          const rest = match[2];
+          // 文件名中 【类型】 之后必须紧跟需求单编号
+          if (!rest.startsWith(orderNum)) continue;
+
+          let subBatch = null;
+          const restAfterOrder = rest.substring(orderNum.length);
+          const subBatchMatch = restAfterOrder.match(/^-(\d+)-\s*/);
+          if (subBatchMatch) {
+            const extracted = subBatchMatch[1];
+            if (validSubBatches.has(extracted)) subBatch = extracted;
+          }
+          discovered.push({ original_name: fileName, stored_name: fileName, file_path: filePath, file_type: fileType, sub_batch: subBatch });
+        }
+      }
+
       let count = 0;
       if (discovered.length) {
         const ins = db.prepare('INSERT OR IGNORE INTO flow_files (order_id, file_type, original_name, file_path, stored_name, sub_batch) VALUES (?,?,?,?,?,?)');
@@ -152,7 +212,7 @@ module.exports = function (app) {
           for (const f of discovered) { ins.run(orderId, f.file_type, f.original_name, f.file_path, f.stored_name, f.sub_batch); count++; }
         })();
       }
-      res.json({ success: true, data: discovered, count });
+      res.json({ success: true, data: discovered, count, cleaned });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 

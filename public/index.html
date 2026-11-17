@@ -58,7 +58,16 @@
       <option value="1">是</option>
       <option value="0">否</option>
     </select>
-    <button class="btn btn-primary" onclick="applyFilters()" title="按选中的部门、日期范围筛选需求单">🔍 查询</button>
+    <select id="filter-is-scheduled" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
+      <option value="">是否排期</option>
+      <option value="1">已排期</option>
+      <option value="2">部分排期</option>
+      <option value="0">未排期</option>
+    </select>
+    <select id="filter-ccb-meeting" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;max-width:200px">
+      <option value="">全部会议</option>
+    </select>
+    <button class="btn btn-primary" onclick="applyFilters()" title="按部门、日期、立项、排期、CCB会议等条件筛选需求单">🔍 查询</button>
     <button class="btn" onclick="resetFilters()" title="清除所有筛选条件，显示全部需求单">↻ 重置</button>
     <span class="filter-sep" style="margin-left:auto"></span>
     <span style="font-size:12px;color:#999">排序</span>
@@ -133,13 +142,19 @@
     <span id="file-result-info" style="font-size:13px;color:#999;margin-left:12px"></span>
     <p>跨需求单统一管理流转文件，支持下载和筛选</p>
   </div>
+  <div class="tab-bar file-type-tabs" style="margin-bottom:12px">
+    <div class="tab-item active" data-ft="" onclick="switchFileTypeTab(this)">📄 全部 <span class="tab-count">0</span></div>
+    <div id="file-type-tabs" style="display:flex"></div>
+    <div style="flex:1"></div>
+    <button class="btn btn-sm trash-entry" onclick="showTrashModal()" title="查看已删除到回收站的文件">🗑️ 回收站 <span id="file-trash-count" class="badge-red">0</span></button>
+  </div>
   <div class="filter-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:8px 12px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)">
     <input type="text" id="file-filter-keyword" placeholder="🔍 订单编号/名称/文件名" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:180px">
-    <select id="file-filter-type" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
-      <option value="">全部类型</option>
-    </select>
     <select id="file-filter-department" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:100px">
       <option value="">提出部门</option>
+    </select>
+    <select id="file-filter-project" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;max-width:200px">
+      <option value="">全部项目</option>
     </select>
     <input type="date" id="file-filter-date-from" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:130px">
     <span style="color:#999;font-size:12px">~</span>
@@ -148,7 +163,6 @@
     <button class="btn btn-sm" onclick="resetFileFilter()">↻ 重置</button>
     <span style="font-size:12px;color:#999">分组</span>
     <select id="file-filter-group" onchange="applyFileFilter()" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
-      <option value="type">按文件类型</option>
       <option value="department">按提出部门</option>
       <option value="">不分组</option>
     </select>
@@ -166,20 +180,66 @@
     <h2>📋 需规归档管理</h2>
     <p>按版本管理需规文档，自动扫描目录并关联排期需求点</p>
   </div>
-  <div class="toolbar" style="margin-bottom:16px">
-    <select id="spec-version-filter" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:150px">
-      <option value="">全部版本</option>
-    </select>
-    <button class="btn btn-primary" onclick="scanSpecDocs()">🔍 扫描目录</button>
-    
-    <span id="spec-result-info" style="font-size:13px;color:#999;margin-left:12px"></span>
+
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <div class="tab-item active" data-tab="spec-tree" onclick="switchSpecTab('spec-tree')">📂 文档扫描</div>
+    <div class="tab-item" data-tab="spec-query" onclick="switchSpecTab('spec-query')">🔍 文档查询</div>
   </div>
-  <div id="specs-container">
-    <div id="specs-empty-state" style="display:none">
-      <div class="empty-state"><div class="icon">📋</div><p>暂无需规文档</p><p style="font-size:12px;color:#999;margin-top:4px">请先配置需规文档路径，然后点击"扫描目录"自动发现文档</p></div>
+
+  <!-- Tab: 树状视图 -->
+  <div id="tab-spec-tree" class="tab-content" style="display:block">
+    <div class="spec-folder-notice">
+      <strong>📁 需规目录结构要求：</strong>
+      需规文档须按版本分文件夹存放 →
+      <code>需规目录/<b>{版本名}</b>/</code>
+      <span class="spec-folder-example">例如：需规目录/2026年端午版本/需求规格.docx</span>
+      <br>
+      <span style="font-size:12px">💡 纪要文件放入 <code>需规目录/{版本名}/meetings/</code> 子文件夹，扫描时会自动归入「评审会议纪要」树。</span>
     </div>
-    <div id="specs-list"></div>
-    <div id="specs-pagination" class="pagination"></div>
+
+    <div class="toolbar" style="margin-bottom:16px">
+      <select id="spec-version-filter" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:150px">
+        <option value="">全部版本</option>
+      </select>
+      <button class="btn btn-primary" onclick="scanSpecDocs()">🔍 扫描目录</button>
+      <span class="tree-controls" style="display:inline-flex;gap:4px;margin-left:8px;vertical-align:middle">
+        <button onclick="expandAllTree()" title="展开全部">⊞ 全部展开</button>
+        <button onclick="collapseAllTree()" title="收起全部">⊟ 全部收起</button>
+      </span>
+      <span id="spec-result-info" style="font-size:13px;color:#999;margin-left:12px"></span>
+    </div>
+    <div id="specs-container">
+      <div id="specs-empty-state" style="display:none">
+        <div class="empty-state"><div class="icon">📋</div><p>暂无需规文档</p><p style="font-size:12px;color:#999;margin-top:4px">请先配置需规文档路径，然后点击"扫描目录"自动发现文档</p></div>
+      </div>
+      <div id="specs-list"></div>
+    </div>
+  </div>
+
+  <!-- Tab: 文档查询 -->
+  <div id="tab-spec-query" class="tab-content" style="display:none">
+    <div class="toolbar" style="flex-wrap:wrap;gap:8px;display:flex;align-items:center">
+      <select id="sq-version" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px">
+        <option value="">全部版本</option>
+      </select>
+      <select id="sq-system" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px">
+        <option value="">全部系统</option>
+      </select>
+      <select id="sq-department" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px">
+        <option value="">全部部门</option>
+      </select>
+      <select id="sq-project" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;max-width:200px">
+        <option value="">全部项目</option>
+      </select>
+      <input type="text" id="sq-keyword" placeholder="🔍 文件名关键字" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:150px">
+      <button class="btn btn-primary" onclick="loadSpecQuery(1)">🔍 查询</button>
+      <span id="sq-result-info" style="font-size:13px;color:#999;margin-left:8px"></span>
+    </div>
+    <div id="sq-results" style="margin-top:12px">
+      <div class="empty-state"><div class="icon">🔍</div><p>选择筛选条件后点击查询</p></div>
+    </div>
+    <div id="sq-pagination" class="pagination" style="margin-top:12px"></div>
   </div>
 </div>
 
@@ -215,6 +275,13 @@
         <div><span id="config-file_type-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
       </div>
       <div class="config-group-body" id="config-body-file_type"></div>
+    </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">📋 项目名称</span>
+        <div><span id="config-project-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-project"></div>
     </div>
     <div class="config-group">
       <div class="config-group-header" onclick="toggleConfigGroup(this)">
@@ -337,7 +404,10 @@
         <div class="form-group"><select id="file-type" class="form-control"></select></div>
         <div class="form-group"><select id="file-batch" class="form-control" style="min-width:120px"><option value="">所属子单（选填）</option></select></div>
         <div class="form-group"><input type="file" id="file-upload" class="form-control"></div>
-        <div class="form-group" style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="uploadFile()" title="上传需求单流转文件。文件名将以【文件类型】开头自动规范命名">上传</button></div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px">
+          <button class="btn btn-primary" onclick="uploadFile()" title="上传需求单流转文件。文件名将以【文件类型】开头自动规范命名">上传</button>
+          <button class="btn" onclick="refreshOrderFiles()" title="扫描目录并同步最新文件记录，自动清理已失效的记录">🔄 刷新关联</button>
+        </div>
       </div>
       <div id="detail-files" class="file-list"></div>
     </div>
@@ -370,7 +440,14 @@
     <div class="form-group"><label>CCB会议 <span class="required">*</span></label><select id="detail-schedule-meeting" class="form-control"></select></div>
     <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="detail-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
     <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="detail-schedule-version" class="form-control"></select></div>
-    <div class="form-group"><label><input type="checkbox" id="detail-schedule-is-project"> 已立项</label></div>
+    <div class="form-group"><label><input type="checkbox" id="detail-schedule-is-project" onchange="toggleProjectRow('detail-schedule-is-project','detail-project-row')"> 已立项</label></div>
+    <div class="form-group" id="detail-project-row" style="display:none">
+      <label>项目名称</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="detail-schedule-project" class="form-control"></select>
+        <button type="button" class="btn btn-sm" onclick="createProjectFor('detail-schedule-project')" title="创建一个新项目并加入下拉框">＋ 新建项目</button>
+      </div>
+    </div>
     <input type="hidden" id="schedule-point-id"><input type="hidden" id="schedule-order-id">
   </div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('quick-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmQuickSchedule()">确认排期</button></div>
@@ -420,7 +497,14 @@
     <div class="form-group"><label>CCB会议</label><select id="edit-schedule-meeting" class="form-control"></select></div>
     <div class="form-group"><label>涉及系统（可多选） <span class="required">*</span></label><div id="edit-schedule-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div></div>
     <div class="form-group"><label>上线版本 <span class="required">*</span></label><select id="edit-schedule-version" class="form-control"></select></div>
-    <div class="form-group"><label><input type="checkbox" id="edit-schedule-is-project"> 已立项</label></div>
+    <div class="form-group"><label><input type="checkbox" id="edit-schedule-is-project" onchange="toggleProjectRow('edit-schedule-is-project','edit-project-row')"> 已立项</label></div>
+    <div class="form-group" id="edit-project-row" style="display:none">
+      <label>项目名称</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="edit-schedule-project" class="form-control"></select>
+        <button type="button" class="btn btn-sm" onclick="createProjectFor('edit-schedule-project')" title="创建一个新项目并加入下拉框">＋ 新建项目</button>
+      </div>
+    </div>
     <input type="hidden" id="edit-schedule-id">
   </div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('edit-schedule-modal')">取消</button><button type="button" class="btn btn-primary" onclick="confirmEditSchedule()">确认修改</button></div>
@@ -499,25 +583,43 @@
   </div>
 </div></div>
 
+<!-- Trash Modal -->
+<div id="trash-modal" class="modal-overlay"><div class="modal modal-lg">
+  <div class="modal-header">
+    <h3>🗑️ 回收站</h3>
+    <span id="trash-info" style="font-size:13px;color:#999;flex:1;margin-left:12px"></span>
+    <button class="btn btn-sm btn-danger" onclick="clearAllTrash()" title="彻底删除回收站中所有文件，不可恢复！">🧹 清空回收站</button>
+    <button class="modal-close" onclick="closeModal('trash-modal')">×</button>
+  </div>
+  <div class="modal-body">
+    <div id="trash-empty-state" class="empty-state"><div class="icon">🗑️</div><p>回收站是空的</p></div>
+    <div id="trash-list"></div>
+    <div id="trash-pagination" class="pagination"></div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn" onclick="closeModal('trash-modal')">关闭</button>
+  </div>
+</div></div>
+
 <footer class="app-footer">
   <div class="footer-content">
-    <span>需求单信息管理系统 v2.0.0</span>
+    <span>需求单信息管理系统 v2.3.2</span>
     <span>创作者：Yu by AI</span>
-    <span>发布日期：2026-06-18</span>
+    <span>发布日期：2026-11-17</span>
   </div>
 </footer>
-<script src="/js/api.js?v=2.0.0"></script>
-<script src="/js/components.js?v=2.0.0"></script>
-<script src="/js/features/renderers.js?v=2.0.0"></script>
-<script src="/js/features/navigation.js?v=2.0.0"></script>
-<script src="/js/pages/config.js?v=2.0.0"></script>
-<script src="/js/pages/orders.js?v=2.0.0"></script>
-<script src="/js/pages/meetings.js?v=2.0.0"></script>
-<script src="/js/pages/schedules.js?v=2.0.0"></script>
-<script src="/js/pages/files.js?v=2.0.0"></script>
-<script src="/js/pages/specs.js?v=2.0.0"></script>
-<script src="/js/features/search.js?v=2.0.0"></script>
-<script src="/js/features/import-export.js?v=2.0.0"></script>
-<script src="/js/app.js?v=2.0.0"></script>
+<script src="/js/api.js?v=2.3.2"></script>
+<script src="/js/components.js?v=2.3.2"></script>
+<script src="/js/features/renderers.js?v=2.3.2"></script>
+<script src="/js/features/navigation.js?v=2.3.2"></script>
+<script src="/js/pages/config.js?v=2.3.2"></script>
+<script src="/js/pages/orders.js?v=2.3.2"></script>
+<script src="/js/pages/meetings.js?v=2.3.2"></script>
+<script src="/js/pages/schedules.js?v=2.3.2"></script>
+<script src="/js/pages/files.js?v=2.3.2"></script>
+<script src="/js/pages/specs.js?v=2.3.2"></script>
+<script src="/js/features/search.js?v=2.3.2"></script>
+<script src="/js/features/import-export.js?v=2.3.2"></script>
+<script src="/js/app.js?v=2.3.2"></script>
 </body>
 </html>

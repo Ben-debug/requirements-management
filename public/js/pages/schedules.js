@@ -207,9 +207,43 @@ function toggleBatchDesc(descId) {
   else { el.classList.add('point-desc-clamped'); if (btn) btn.textContent = '展开全文 ▼'; }
 }
 
+// ---- 项目名称下拉（已立项时使用）----
+function toggleProjectRow(checkboxId, rowId) {
+  const row = document.getElementById(rowId), cb = document.getElementById(checkboxId);
+  if (row && cb) row.style.display = cb.checked ? 'flex' : 'none';
+}
+
+function fillProjectSelect(selectId, projects, current) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="">请选择项目</option>';
+  (projects || []).forEach(name => {
+    const o = document.createElement('option'); o.value = name; o.textContent = name; sel.appendChild(o);
+  });
+  if (current) {
+    let opt = Array.from(sel.options).find(o => o.value === current);
+    if (!opt) { opt = document.createElement('option'); opt.value = current; opt.textContent = current; sel.appendChild(opt); }
+    sel.value = current;
+  }
+}
+
+async function createProjectFor(selectId) {
+  const name = prompt('请输入新项目名称');
+  if (!name || !name.trim()) return;
+  const label = name.trim();
+  try {
+    await api('/api/config', { method: 'POST', body: JSON.stringify({ category: 'project', label }) });
+    const sel = document.getElementById(selectId);
+    let opt = Array.from(sel.options).find(o => o.value === label);
+    if (!opt) { opt = document.createElement('option'); opt.value = label; opt.textContent = label; sel.appendChild(opt); }
+    sel.value = label;
+    showToast('项目已创建', 'success');
+  } catch (e) { showToast(e.message || '创建失败', 'error'); }
+}
+
 // ---- 单条排期 ----
 async function showScheduleModal(pointId, orderId) {
-  const [s, v, m] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings')]);
+  const [s, v, m, p] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings'), api('/api/config/project')]);
   const sys = s.data, vers = v.data, meetings = m.data;
   if (!meetings.length) { showToast('请先创建CCB会议', 'error'); navigate('meetings'); return; }
   const mtgSelect = document.getElementById('detail-schedule-meeting');
@@ -217,6 +251,9 @@ async function showScheduleModal(pointId, orderId) {
   meetings.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.meeting_name} (${m.meeting_date})`; mtgSelect.appendChild(o); });
   renderSystemCheckboxes('detail-schedule-systems', sys, []);
   fillSelect('detail-schedule-version', vers, '请选择版本');
+  document.getElementById('detail-schedule-is-project').checked = false;
+  toggleProjectRow('detail-schedule-is-project', 'detail-project-row');
+  fillProjectSelect('detail-schedule-project', p.data, '');
   document.getElementById('schedule-point-id').value = pointId;
   document.getElementById('schedule-order-id').value = orderId;
   openModal('quick-schedule-modal');
@@ -231,10 +268,11 @@ async function confirmQuickSchedule() {
   if (!systems.length) { showToast('请至少选择一个系统', 'error'); return; }
   if (!version) { showToast('请选择版本', 'error'); return; }
   const isProject = document.getElementById('detail-schedule-is-project').checked ? 1 : 0;
+  const projectName = isProject ? document.getElementById('detail-schedule-project').value : null;
   try {
     const r = await fetch(`/api/meetings/${meetingId}/schedules`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: parseInt(orderId), point_id: parseInt(pointId), system: systems.join(','), version, is_project: isProject })
+      body: JSON.stringify({ order_id: parseInt(orderId), point_id: parseInt(pointId), system: systems.join(','), version, is_project: isProject, project_name: projectName })
     });
     const d = await r.json();
     if (!d.success) throw new Error(d.message);
@@ -246,9 +284,10 @@ async function confirmQuickSchedule() {
 
 // ---- 修改排期 ----
 async function openEditScheduleModal(scheduleId, orderId) {
-  const [s, v, meetings, orderData] = await Promise.all([
+  const [s, v, meetings, orderData, p] = await Promise.all([
     api('/api/config/system'), api('/api/config/version'), api('/api/meetings'),
-    orderId ? api(`/api/orders/${orderId}`) : Promise.resolve(null)
+    orderId ? api(`/api/orders/${orderId}`) : Promise.resolve(null),
+    api('/api/config/project')
   ]);
   const sys = s.data, vers = v.data;
   let currentSchedule = null;
@@ -266,7 +305,10 @@ async function openEditScheduleModal(scheduleId, orderId) {
   const currentVersion = currentSchedule ? currentSchedule.version : '';
   const currentMeetingId = currentSchedule ? currentSchedule.meeting_id : '';
   const currentIsProject = currentSchedule ? currentSchedule.is_project : 0;
+  const currentProjectName = currentSchedule ? currentSchedule.project_name : null;
   document.getElementById('edit-schedule-is-project').checked = currentIsProject ? true : false;
+  toggleProjectRow('edit-schedule-is-project', 'edit-project-row');
+  fillProjectSelect('edit-schedule-project', p.data, currentProjectName);
 
   const mtgSelect = document.getElementById('edit-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">不修改会议</option>';
@@ -288,8 +330,9 @@ async function confirmEditSchedule() {
   if (!systems.length) { showToast('请至少选择一个系统', 'error'); return; }
   if (!version) { showToast('请选择版本', 'error'); return; }
   const isProject = document.getElementById('edit-schedule-is-project').checked ? 1 : 0;
+  const projectName = isProject ? document.getElementById('edit-schedule-project').value : null;
   try {
-    const body = { system: systems.join(','), version, is_project: isProject };
+    const body = { system: systems.join(','), version, is_project: isProject, project_name: projectName };
     if (meetingId) body.meeting_id = parseInt(meetingId);
     await api(`/api/schedules/${scheduleId}`, { method: 'PUT', body: JSON.stringify(body) });
     showToast('排期已更新', 'success');

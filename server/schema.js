@@ -46,6 +46,8 @@ function initDatabase(db) {
       version TEXT NOT NULL,
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL UNIQUE,
+      doc_type TEXT DEFAULT 'spec_doc',
+      meeting_date TEXT,
       matched_systems TEXT DEFAULT '',
       auto_matched INTEGER DEFAULT 0,
       notes TEXT DEFAULT '',
@@ -67,7 +69,11 @@ function initDatabase(db) {
   try { db.exec("ALTER TABLE flow_files ADD COLUMN sub_batch TEXT"); } catch (e) {}
   try { db.exec("ALTER TABLE requirement_orders ADD COLUMN background TEXT"); } catch (e) {}
   try { db.exec("ALTER TABLE ccb_schedules ADD COLUMN is_project INTEGER DEFAULT 0"); } catch (e) {}
+  try { db.exec("ALTER TABLE ccb_schedules ADD COLUMN project_name TEXT"); } catch (e) {}
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN notes TEXT DEFAULT ''"); } catch (e) {}
+  try { db.exec("ALTER TABLE spec_documents ADD COLUMN doc_type TEXT DEFAULT 'spec_doc'"); } catch (e) {}
+  try { db.exec("ALTER TABLE spec_documents ADD COLUMN meeting_date TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE flow_files ADD COLUMN deleted_at TEXT"); } catch (e) {}
 }
 
 module.exports = { initDatabase };

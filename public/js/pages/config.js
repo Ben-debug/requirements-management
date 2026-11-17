@@ -25,7 +25,7 @@ async function loadConfig() {
     if (configPathEl && d.config_path) {
       configPathEl.innerHTML = `📄 配置文件路径：<code style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:12px;word-break:break-all">${esc(d.config_path)}</code>`;
     }
-    ['department', 'version', 'system', 'file_type'].forEach(cat => {
+    ['department', 'version', 'system', 'file_type', 'project'].forEach(cat => {
       const body = document.getElementById(`config-body-${cat}`);
       const count = document.getElementById(`config-${cat}-count`);
       const items = data[cat] || [];
@@ -45,7 +45,7 @@ async function loadConfig() {
 }
 
 function showAddConfig(cat) {
-  const labels = { department: '业务部门', version: '上线版本', system: '涉及改造系统', file_type: '流转文件类型' };
+  const labels = { department: '业务部门', version: '上线版本', system: '涉及改造系统', file_type: '流转文件类型', project: '项目' };
   document.getElementById('config-modal-title').textContent = `添加${labels[cat]}`;
   document.getElementById('config-label-text').textContent = `${labels[cat]}名称 *`;
   document.getElementById('config-category-input').value = cat;

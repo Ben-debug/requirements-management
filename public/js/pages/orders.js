@@ -15,6 +15,10 @@ function getFilterParams() {
   if (dt) params.date_to = dt;
   const ip = document.getElementById('filter-is-project')?.value;
   if (ip) params.is_project = ip;
+  const isched = document.getElementById('filter-is-scheduled')?.value;
+  if (isched) params.is_scheduled = isched;
+  const meeting = document.getElementById('filter-ccb-meeting')?.value;
+  if (meeting) params.meeting_name = meeting;
   const sort = document.getElementById('filter-sort')?.value;
   if (sort) params.sort = sort;
   const order = document.getElementById('filter-order')?.value;
@@ -88,6 +92,16 @@ async function loadOrders() {
         r.filters.departments.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
       }
     }
+    // CCB 会议下拉：每次加载刷新选项，并保留当前选中项
+    const meetingSel = document.getElementById('filter-ccb-meeting');
+    if (meetingSel) {
+      const current = meetingSel.value;
+      meetingSel.innerHTML = '<option value="">全部会议</option>';
+      (r.filters?.meetings || []).forEach(m => {
+        const o = document.createElement('option'); o.value = m; o.textContent = m; meetingSel.appendChild(o);
+      });
+      if (current && Array.from(meetingSel.options).some(o => o.value === current)) meetingSel.value = current;
+    }
   } catch (e) { console.error("loadOrders error:", e); }
 }
 
@@ -98,6 +112,8 @@ function resetFilters() {
   document.getElementById('filter-date-from').value = '';
   document.getElementById('filter-date-to').value = '';
   document.getElementById('filter-is-project').value = '';
+  document.getElementById('filter-is-scheduled').value = '';
+  document.getElementById('filter-ccb-meeting').value = '';
   document.getElementById('filter-group-orders').value = 'department';
   document.getElementById('filter-sort').value = 'order_number';
   document.getElementById('filter-order').value = 'asc';
@@ -246,6 +262,26 @@ async function scanAndLinkOrderFiles(orderId) {
   } catch (e) { /* 静默 */ }
 }
 
+async function refreshOrderFiles() {
+  const orderId = document.getElementById('detail-order-id').value;
+  if (!orderId) return;
+  const btn = document.querySelector('button[onclick="refreshOrderFiles()"]');
+  const orig = btn?.textContent || '🔄 刷新关联';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 刷新中...'; }
+  try {
+    const r = await fetch(`/api/orders/${orderId}/scan-files?refresh=1`);
+    const d = await r.json();
+    if (!d.success) throw new Error(d.message);
+    let msgs = [];
+    if (d.cleaned > 0) msgs.push(`已清理 ${d.cleaned} 个失效记录`);
+    if (d.count > 0) msgs.push(`新关联 ${d.count} 个文件`);
+    if (msgs.length) showToast(msgs.join('，'), 'success');
+    else showToast('文件记录已是最新，无需更新', 'info');
+    viewOrder(orderId);
+  } catch (e) { showToast(e.message || '刷新失败', 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
+}
+
 // ---- 需求点渲染 ----
 function renderDetailPoints(points) {
   const c = document.getElementById('detail-points');
@@ -341,7 +377,8 @@ function renderPointItem(p, oid) {
       <div id="${descId}" class="point-desc ${isLong ? 'point-desc-clamped' : ''}" onclick="${isLong ? `togglePointDesc('${descId}')` : ''}">${esc(p.description).replace(/\n/g, '<br>')}</div>
       ${isLong ? `<span class="desc-toggle-btn" onclick="togglePointDesc('${descId}')">展开全文 ▼</span>` : ''}
       <div class="point-meta">${has ? `<span style="color:#52c41a">✅ ${systems.map(s => esc(s.trim())).join(', ')} | ${esc(p.schedule_version)}</span>` : '<span style="color:#fa8c16">⏳ 待排期</span>'}
-      ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}</div>
+      ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}
+      ${p.is_project ? ` | <span style="color:#fa8c16">📋 项目：${esc(p.project_name || '未指定')}</span>` : ''}</div>
     </div>
     <div class="point-actions">
       <button class="btn btn-sm" onclick="editPoint(${p.id},${oid})">编辑</button>
@@ -462,10 +499,10 @@ async function uploadFile() {
 }
 
 async function deleteFile(id) {
-  if (!confirm('确定删除？')) return;
+  if (!confirm('确定删除？\n文件将被移入回收站，可随时恢复。')) return;
   try {
     await api(`/api/files/${id}`, { method: 'DELETE' });
-    showToast('已删除', 'success');
+    showToast('已移入回收站', 'success');
     viewOrder(document.getElementById('detail-order-id').value);
   } catch (e) {}
 }

@@ -60,6 +60,7 @@ window.deleteFile = deleteFile;
 window.batchScheduleSubOrder = batchScheduleSubOrder;
 window.confirmBatchSchedule = confirmBatchSchedule;
 window.renderFiles = renderFiles;
+window.refreshOrderFiles = refreshOrderFiles;
 
 // ---- meetings.js ----
 window.loadMeetings = loadMeetings;
@@ -78,6 +79,8 @@ window.confirmEditSchedule = confirmEditSchedule;
 window.deleteScheduleFromDetail = deleteScheduleFromDetail;
 window.deleteScheduleFromMeeting = deleteScheduleFromMeeting;
 window.openEditScheduleModalFromMeeting = openEditScheduleModalFromMeeting;
+window.toggleProjectRow = toggleProjectRow;
+window.createProjectFor = createProjectFor;
 window.batchGenerateAssessments = batchGenerateAssessments;
 window.loadBatchScheduleTable = loadBatchScheduleTable;
 window.saveBatchSchedules = saveBatchSchedules;
@@ -93,19 +96,25 @@ window.gotoSchedulePage = gotoSchedulePage;
 
 // ---- files.js ----
 window.loadFiles = loadFiles;
+window.switchFileTypeTab = switchFileTypeTab;
 window.applyFileFilter = applyFileFilter;
 window.resetFileFilter = resetFileFilter;
 window.gotoFilePage = gotoFilePage;
 window.deleteFileFromList = deleteFileFromList;
+window.showTrashModal = showTrashModal;
+window.loadTrashFiles = loadTrashFiles;
+window.gotoTrashPage = gotoTrashPage;
+window.restoreFile = restoreFile;
+window.permanentDeleteFile = permanentDeleteFile;
+window.clearAllTrash = clearAllTrash;
 
 // ---- specs.js ----
-window.loadSpecs = loadSpecs;
+window.loadSpecs = loadSpecTree;     // 别名：兼容 navigation.js 调用
 window.gotoSpectPage = gotoSpectPage;
 window.scanSpecDocs = scanSpecDocs;
 window.openSpecMatch = openSpecMatch;
 window.confirmSpecMatch = confirmSpecMatch;
 window.deleteSpec = deleteSpec;
-window.toggleSpecPoints = toggleSpecPoints;
 
 // ---- navigation.js ----
 window.navigate = navigate;

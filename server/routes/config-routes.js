@@ -5,7 +5,7 @@
 const config = require('../config');
 const wordGenerator = require('../word-generator');
 const { getDatabase } = require('../database');
-const { createUploadMiddleware } = require('../middleware/upload');
+const { createUploadMiddleware, removeTempFile } = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
 
@@ -87,11 +87,6 @@ module.exports = function (app) {
   });
 
   // ---- 配置分类 CRUD ----
-  app.get('/api/config/:category', (req, res) => {
-    try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
-    catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
-
   app.get('/api/config', (req, res) => {
     try { res.json({ success: true, data: config.getAll(), config_path: config.getConfigPath() }); }
     catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -126,16 +121,16 @@ module.exports = function (app) {
       if (!req.file) return res.status(400).json({ success: false, message: '请选择 Word 模板文件' });
       const name = req.file.originalname || '';
       if (!name.toLowerCase().endsWith('.docx')) {
-        try { fs.unlinkSync(req.file.path); } catch (e) {}
         return res.status(400).json({ success: false, message: '仅支持 .docx 格式的 Word 模板文件' });
       }
       const templateDir = getTemplateDir();
       const destPath = path.join(templateDir, TEMPLATE_FILENAME);
-      try { fs.copyFileSync(req.file.path, destPath); fs.unlinkSync(req.file.path); } catch (e) {
+      try { fs.copyFileSync(req.file.path, destPath); } catch (e) {
         return res.status(500).json({ success: false, message: '模板保存失败' });
       }
       res.json({ success: true, message: '模板上传成功' });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    finally { removeTempFile(req); }
   });
 
   app.delete('/api/config/assessment-template', (req, res) => {
@@ -149,6 +144,12 @@ module.exports = function (app) {
         res.json({ success: false, message: '模板不存在' });
       }
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
+  // 参数路由必须放在所有 /api/config/* 静态路由之后，否则会遮蔽具体路径
+  app.get('/api/config/:category', (req, res) => {
+    try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
+    catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   // ---- 升级日志 ----

@@ -6,6 +6,7 @@ const defaults = {
   version: ['2026年端午版本', '2026年国庆版本', '2027年元旦版本'],
   system: ['业务服务平台', '会员服务平台', '竞价交易系统', '清算系统'],
   file_type: ['需求服务单', '需求意向书及评估表', '项目需求书'],
+  project: [],
   paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '', service_order_dir: '', spec_docs_dir: '' }
 };
 
@@ -111,4 +112,17 @@ function getConfigPath() {
   return configPath();
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load, setConfigDir, getConfigPath };
+/** 读取访问口令（config.json 的 auth.password） */
+function getAuthPassword() {
+  const data = load();
+  return data.auth && data.auth.password ? String(data.auth.password) : '';
+}
+
+/** 写入访问口令 */
+function setAuthPassword(pwd) {
+  const data = load();
+  data.auth = { password: pwd };
+  save();
+}
+
+module.exports = { getAll, getCategory, addItem, deleteItem, getPath, setPath, load, setConfigDir, getConfigPath, getAuthPassword, setAuthPassword };

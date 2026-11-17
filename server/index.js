@@ -5,19 +5,17 @@
  * 路由逻辑已拆分到 server/routes/ 各模块
  */
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { getDatabase, initDataDir, reopenDatabase } = require('./database');
+const { initDataDir } = require('./database');
 const config = require('./config');
 const { errorHandler, fallbackHandler } = require('./middleware/error-handler');
-const { bumpVersion } = require('./utils');
 
 const app = express();
 const PORT = 3000;
 
 // ---- 基础中间件 ----
-app.use(cors());
+// 前后端同源，不需要 CORS；放开会让任意站点读取本机 API
 app.use(express.json());
 
 // ---- 目录路径解析 ----
@@ -54,6 +52,40 @@ if (customDataDir) {
   }
 }
 
+// ---- 访问鉴权（Basic Auth）----
+// 必须挂在静态资源之前，否则首页和 JS/CSS 不受保护
+const crypto = require('crypto');
+const AUTH_USER = 'admin';
+let authPassword = config.getAuthPassword();
+if (!authPassword) {
+  authPassword = crypto.randomBytes(6).toString('hex');
+  config.setAuthPassword(authPassword);
+}
+console.log('\n============================================');
+console.log(`  访问认证  用户名: ${AUTH_USER}`);
+console.log(`            口令:   ${authPassword}`);
+console.log(`  局域网访问: http://<本机IP>:${PORT}`);
+console.log(`  修改口令: ${config.getConfigPath()} 的 auth.password（重启生效）`);
+console.log('============================================\n');
+
+const deny = (res) => {
+  res.set('WWW-Authenticate', 'Basic realm="Requirement Manager", charset="UTF-8"');
+  return res.status(401).send('需要用户名和口令');
+};
+
+app.use((req, res, next) => {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) return deny(res);
+  const decoded = Buffer.from(header.slice(6).trim(), 'base64').toString('utf8');
+  const sep = decoded.indexOf(':');
+  if (sep < 0) return deny(res);
+  const user = decoded.slice(0, sep);
+  const pass = decoded.slice(sep + 1);
+  const hash = s => crypto.createHash('sha256').update(s).digest();
+  if (user === AUTH_USER && crypto.timingSafeEqual(hash(pass), hash(authPassword))) return next();
+  return deny(res);
+});
+
 // ---- 静态文件 ----
 app.use(express.static(path.join(ROOT_DIR, 'public'), { maxAge: 0, etag: false }));
 
@@ -87,14 +119,6 @@ function ensureUploadDirs() {
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 }
 ensureUploadDirs();
-
-// ---- 自动记录升级日志 ----
-try {
-  const db = getDatabase();
-  const lastLog = db.prepare('SELECT version FROM upgrade_logs ORDER BY id DESC LIMIT 1').get();
-  const ver = lastLog ? bumpVersion(lastLog.version) : 'v1.0.0';
-  db.prepare("INSERT INTO upgrade_logs (version,title,content) VALUES (?,?,?)").run(ver, `系统重新启动 ${ver}`, '服务重启自动记录');
-} catch (e) {}
 
 // ============================================================
 // 路由注册
@@ -138,6 +162,7 @@ server.on('error', (err) => {
     console.error(`\n如果浏览器已打开，请直接访问: http://localhost:${PORT}`);
     try {
       const cp = require('child_process');
+      const url = `http://localhost:${PORT}`;
       if (process.platform === 'win32') cp.exec(`cmd /c start "" "${url}"`);
     } catch (e) {}
   } else {

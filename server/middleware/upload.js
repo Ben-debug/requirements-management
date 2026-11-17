@@ -4,6 +4,7 @@
  */
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 // 允许的文件扩展名
 const ALLOWED_EXTENSIONS = [
@@ -37,4 +38,14 @@ function getAllowedExtensions() {
   return [...ALLOWED_EXTENSIONS];
 }
 
-module.exports = { createUploadMiddleware, getAllowedExtensions, MAX_FILE_SIZE };
+/**
+ * 清理 multer 落盘的临时文件（幂等，可安全重复调用）
+ * 上传路由在 finally 中调用，确保校验失败或异常时不残留临时文件
+ */
+function removeTempFile(req) {
+  const p = req.file && req.file.path;
+  if (!p) return;
+  try { fs.rmSync(p, { force: true }); } catch (e) {}
+}
+
+module.exports = { createUploadMiddleware, getAllowedExtensions, removeTempFile, MAX_FILE_SIZE };

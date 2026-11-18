@@ -4,10 +4,11 @@
  */
 
 // ---- 分页渲染 ----
-function renderPagination(containerId, r, gotoFn) {
+function renderPagination(containerId, r, gotoFn, pageSizeSelectId) {
   const c = document.getElementById(containerId);
   if (!c) return;
   if (!r || r.totalPages <= 1) { c.innerHTML = ''; return; }
+  const selId = pageSizeSelectId || (containerId + '-page-size');
   c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;width:100%">
     <div>
       <button class="page-btn" onclick="${gotoFn}(1)" ${r.page <= 1 ? 'disabled' : ''}>«</button>
@@ -18,7 +19,7 @@ function renderPagination(containerId, r, gotoFn) {
     </div>
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:12px;color:#999">每页</span>
-      <select onchange="${gotoFn}(1)" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <select id="${selId}" onchange="${gotoFn}(1)" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
         <option value="10">10</option>
         <option value="20">20</option>
         <option value="50">50</option>

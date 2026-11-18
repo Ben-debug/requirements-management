@@ -1,7 +1,7 @@
 {
   "name": "requirement-manager",
-  "version": "2.3.2",
-  "description": "需求单信息管理系统",
+  "version": "2.3.3",
+  "description": "我的工作平台",
   "main": "server/index.js",
   "bin": "server/index.js",
   "dependencies": {
@@ -15,7 +15,7 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node scripts/run-tests.js",
-    "build": "npx pkg . --targets node18-win-x64 --no-bytecode --no-native-build --output Release/需求单信息管理系统.exe"
+    "build": "npx pkg . --targets node18-win-x64 --no-bytecode --no-native-build --output Release/我的工作平台.exe"
   },
   "pkg": {
     "assets": [

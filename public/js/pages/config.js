@@ -3,6 +3,12 @@
  * 配置项 CRUD、路径设置、模板管理
  */
 
+// ---- 业务参数 / 系统配置 Tab 切换 ----
+function switchConfigTab(tab) {
+  document.querySelectorAll('#page-config .tab-item').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  document.querySelectorAll('#page-config .tab-content').forEach(el => el.style.display = el.id === 'tab-' + tab ? 'block' : 'none');
+}
+
 // ---- 加载下拉选项（页面初始化用）----
 async function loadDropdowns() {
   try {
@@ -145,6 +151,32 @@ async function savePaths() {
   }
   btn.disabled = false;
   btn.textContent = '保存路径设置';
+}
+
+// ---- 访问口令修改 ----
+async function changePassword() {
+  const current = document.getElementById('pwd-current').value;
+  const password = document.getElementById('pwd-new').value;
+  const confirm = document.getElementById('pwd-confirm').value;
+  const status = document.getElementById('pwd-change-status');
+  if (!current) { showToast('请输入当前口令', 'error'); return; }
+  if (password.length < 6) { showToast('新口令至少 6 位', 'error'); return; }
+  if (password !== confirm) { showToast('两次输入的新口令不一致', 'error'); return; }
+  const btn = document.querySelector('button[onclick="changePassword()"]');
+  const orig = btn?.textContent || '修改口令';
+  if (btn) { btn.disabled = true; btn.textContent = '修改中...'; }
+  try {
+    await api('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ current, password, confirm })
+    });
+    showToast('口令已修改，当前会话已更新，其它会话需重新登录', 'success');
+    ['pwd-current', 'pwd-new', 'pwd-confirm'].forEach(id => { document.getElementById(id).value = ''; });
+    if (status) status.textContent = '✅ 已生效';
+  } catch (e) {
+    showToast(e.message || '修改失败', 'error');
+    if (status) status.textContent = '❌ ' + (e.message || '修改失败');
+  } finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
 }
 
 // ---- 文件夹选择器 ----

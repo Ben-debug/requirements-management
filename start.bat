@@ -1,9 +1,9 @@
 @echo off
-title 需求单信息管理系统
+title 我的工作平台
 color 0B
 echo ============================================
-echo   需求单信息管理系统 v2.3.2
-echo   Requirement Order Manager
+echo   我的工作平台 v2.3.3
+echo   MY WORKSPACE
 echo ============================================
 echo.
 echo 正在启动服务...

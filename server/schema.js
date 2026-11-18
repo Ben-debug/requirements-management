@@ -47,6 +47,7 @@ function initDatabase(db) {
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL UNIQUE,
       doc_type TEXT DEFAULT 'spec_doc',
+      archive_category TEXT DEFAULT 'word_version',
       meeting_date TEXT,
       matched_systems TEXT DEFAULT '',
       auto_matched INTEGER DEFAULT 0,
@@ -73,6 +74,13 @@ function initDatabase(db) {
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN notes TEXT DEFAULT ''"); } catch (e) {}
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN doc_type TEXT DEFAULT 'spec_doc'"); } catch (e) {}
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN meeting_date TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE spec_documents ADD COLUMN archive_category TEXT"); } catch (e) {}
+  // 历史记录按既有规则回填归档类别：纪要→meeting_minutes，PDF→signed_scan，其余→word_version
+  try {
+    db.exec("UPDATE spec_documents SET archive_category='meeting_minutes' WHERE doc_type='meeting_minutes' AND (archive_category IS NULL OR archive_category='')");
+    db.exec("UPDATE spec_documents SET archive_category='signed_scan' WHERE doc_type='spec_doc' AND lower(file_name) LIKE '%.pdf' AND (archive_category IS NULL OR archive_category='')");
+    db.exec("UPDATE spec_documents SET archive_category='word_version' WHERE archive_category IS NULL OR archive_category=''");
+  } catch (e) {}
   try { db.exec("ALTER TABLE flow_files ADD COLUMN deleted_at TEXT"); } catch (e) {}
 }
 

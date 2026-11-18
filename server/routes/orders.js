@@ -28,7 +28,7 @@ module.exports = function (app) {
     try {
       const db = getDatabase();
       const { page = 1, pageSize = 10, department, keyword, date_from, date_to, is_project, is_scheduled, meeting_name, sort = 'created_at', order = 'desc', group_by } = req.query;
-      let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
+      let sql = 'SELECT id, order_number, name, department, related_departments, proposer, propose_date, business_launch_date, status, created_at, updated_at FROM requirement_orders WHERE 1=1';
       const params = [];
       if (department) { sql += ' AND department=?'; params.push(department); }
       if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }

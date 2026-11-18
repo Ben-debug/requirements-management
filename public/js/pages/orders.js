@@ -28,6 +28,16 @@ function getFilterParams() {
   return params;
 }
 
+// CCB 会议下拉选项：保留当前选中项
+function fillMeetingFilterOptions(names) {
+  const sel = document.getElementById('filter-ccb-meeting');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">全部会议</option>';
+  names.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
+  if (current && Array.from(sel.options).some(o => o.value === current)) sel.value = current;
+}
+
 // ---- 加载需求单列表 ----
 async function loadOrders() {
   try {
@@ -40,7 +50,7 @@ async function loadOrders() {
     const tbody = document.querySelector('#orders-table tbody');
     if (!r.items.length) {
       tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>';
-      renderPagination('orders-pagination', r, 'gotoOrderPage');
+      renderPagination('orders-pagination', r, 'gotoOrderPage', 'pagination-page-size');
       return;
     }
 
@@ -83,7 +93,7 @@ async function loadOrders() {
       document.getElementById('orders-pagination').innerHTML = '';
     } else {
       tbody.innerHTML = r.items.map(o => orderRow(o)).join('');
-      renderPagination('orders-pagination', r, 'gotoOrderPage');
+      renderPagination('orders-pagination', r, 'gotoOrderPage', 'pagination-page-size');
     }
 
     if (r.filters?.departments) {
@@ -92,15 +102,10 @@ async function loadOrders() {
         r.filters.departments.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
       }
     }
-    // CCB 会议下拉：每次加载刷新选项，并保留当前选中项
-    const meetingSel = document.getElementById('filter-ccb-meeting');
-    if (meetingSel) {
-      const current = meetingSel.value;
-      meetingSel.innerHTML = '<option value="">全部会议</option>';
-      (r.filters?.meetings || []).forEach(m => {
-        const o = document.createElement('option'); o.value = m; o.textContent = m; meetingSel.appendChild(o);
-      });
-      if (current && Array.from(meetingSel.options).some(o => o.value === current)) meetingSel.value = current;
+    // CCB 会议下拉：首次加载填充一次即可，避免每次翻页/筛选都重建 DOM
+    if (state.meetingFilterOptions === null && Array.isArray(r.filters?.meetings)) {
+      state.meetingFilterOptions = r.filters.meetings;
+      fillMeetingFilterOptions(state.meetingFilterOptions);
     }
   } catch (e) { console.error("loadOrders error:", e); }
 }
@@ -114,7 +119,7 @@ function resetFilters() {
   document.getElementById('filter-is-project').value = '';
   document.getElementById('filter-is-scheduled').value = '';
   document.getElementById('filter-ccb-meeting').value = '';
-  document.getElementById('filter-group-orders').value = 'department';
+  document.getElementById('filter-group-orders').value = 'none';
   document.getElementById('filter-sort').value = 'order_number';
   document.getElementById('filter-order').value = 'asc';
   state.orderPage = 1;

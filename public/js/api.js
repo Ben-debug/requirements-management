@@ -1,8 +1,34 @@
 // ---- 公共 API 工具 ----
 
+let _redirectingToLogin = false;
+function redirectToLogin() {
+  if (_redirectingToLogin || location.pathname === '/login') return;
+  _redirectingToLogin = true;
+  location.href = '/login';
+}
+function shouldRedirectOn401(url) {
+  const u = String(url || '');
+  if (location.pathname === '/login') return false;
+  // 登录/首次设置的 401 是凭据错误，交由登录页自己提示，不跳转
+  if (u.indexOf('/api/auth/login') !== -1 || u.indexOf('/api/auth/setup') !== -1 || u.indexOf('/api/auth/status') !== -1) return false;
+  return true;
+}
+// 全局兜底：页面内大量请求直接使用 fetch，统一处理会话过期
+(function wrapFetch() {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    return nativeFetch(input, init).then(res => {
+      const url = typeof input === 'string' ? input : (input && input.url);
+      if (res.status === 401 && shouldRedirectOn401(url)) redirectToLogin();
+      return res;
+    });
+  };
+})();
+
 /** 封装的 fetch 请求，自动处理 JSON */
 async function api(url, opts={}) {
   const res = await fetch(url, { headers:{'Content-Type':'application/json', ...opts.headers}, ...opts });
+  if (res.status === 401 && shouldRedirectOn401(url)) redirectToLogin();
   const data = await res.json();
   if (!data.success) throw new Error(data.message||'请求失败');
   return data;
@@ -13,6 +39,12 @@ function showToast(msg, type='info') {
   const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = msg;
   document.getElementById('toast-container').appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+/** 退出登录 */
+async function logout() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  location.replace('/login');
 }
 
 /** HTML 转义 */

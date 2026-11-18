@@ -51,152 +51,64 @@ module.exports = function (app) {
   });
 
   // ============================================================
-  // 树状数据（版本→文档→系统→需求单→需求点 + 会议纪要）
+  // 树状数据（版本 → 评审会议纪要 / word版本 / 签字扫描件）
   // ============================================================
   app.get('/api/specs/tree', (req, res) => {
     try {
       const db = getDatabase();
       const { version } = req.query;
-
-      // --- 需规文档树 ---
-      let sql = `
-        SELECT sd.id as spec_id, sd.file_name, sd.version, sd.matched_systems, sd.auto_matched,
-               sdp.point_id,
-               rp.point_number, rp.description,
-               ro.id as order_id, ro.order_number, ro.name as order_name,
-               cs.system as sched_system
-        FROM spec_documents sd
-        LEFT JOIN spec_document_points sdp ON sdp.spec_id = sd.id
-        LEFT JOIN requirement_points rp ON rp.id = sdp.point_id
-        LEFT JOIN requirement_orders ro ON rp.order_id = ro.id
-        LEFT JOIN ccb_schedules cs ON cs.point_id = rp.id AND cs.version = sd.version
-        WHERE sd.doc_type='spec_doc'
-      `;
       const params = [];
-      if (version) { sql += ' AND sd.version=?'; params.push(version); }
-      sql += ' ORDER BY sd.file_name, cs.system, ro.order_number, rp.point_number';
-
+      let sql = 'SELECT id, version, file_name, file_path, doc_type, archive_category, notes, meeting_date, created_at, matched_systems, auto_matched FROM spec_documents WHERE 1=1';
+      if (version) { sql += ' AND version=?'; params.push(version); }
+      sql += ' ORDER BY version, archive_category, file_name';
       const rows = db.prepare(sql).all(...params);
 
-      // 按 version 分组
-      const versionMap = new Map();
-      for (const row of rows) {
-        if (!versionMap.has(row.version)) {
-          versionMap.set(row.version, { version: row.version, docMap: new Map() });
+      const groups = new Map();
+      for (const r of rows) {
+        if (!groups.has(r.version)) {
+          groups.set(r.version, { version: r.version, documents: [], meetings: [], wordVersions: [], signedScans: [] });
         }
-        const verObj = versionMap.get(row.version);
-        if (!verObj.docMap.has(row.spec_id)) {
-          verObj.docMap.set(row.spec_id, {
-            id: row.spec_id,
-            file_name: row.file_name,
-            version: row.version,
-            matched_systems: row.matched_systems || '',
-            auto_matched: row.auto_matched || 0,
-            systems: new Map()
-          });
-        }
-        const spec = verObj.docMap.get(row.spec_id);
-        if (!row.point_id) continue;
-
-        const pointSystems = row.sched_system
-          ? row.sched_system.split(',').map(x => x.trim()).filter(Boolean) : [];
-        const docSystems = (row.matched_systems || '').split(',').map(x => x.trim()).filter(Boolean);
-        const effectiveSystems = pointSystems.filter(s => docSystems.includes(s));
-        if (!effectiveSystems.length) continue;
-
-        for (const sys of effectiveSystems) {
-          if (!spec.systems.has(sys)) spec.systems.set(sys, { name: sys, orders: new Map() });
-          const sysObj = spec.systems.get(sys);
-          const orderKey = row.order_number || '';
-          if (!sysObj.orders.has(orderKey)) {
-            sysObj.orders.set(orderKey, { order_id: row.order_id, order_number: row.order_number || '', order_name: row.order_name || '', points: [] });
-          }
-          const order = sysObj.orders.get(orderKey);
-          if (!order.points.find(p => p.point_id === row.point_id)) {
-            order.points.push({ point_id: row.point_id, point_number: row.point_number || '', description: row.description || '' });
-          }
+        const g = groups.get(r.version);
+        const item = {
+          id: r.id, file_name: r.file_name, file_path: r.file_path || '', version: r.version,
+          matched_systems: r.matched_systems || '', auto_matched: r.auto_matched || 0
+        };
+        if (r.archive_category === 'meeting_minutes' || r.doc_type === 'meeting_minutes') {
+          item.meeting_name = r.notes || path.basename(r.file_name, path.extname(r.file_name));
+          item.meeting_date = r.meeting_date || '';
+          g.meetings.push(item);
+        } else if (r.archive_category === 'signed_scan') {
+          g.signedScans.push(item);
+        } else {
+          g.wordVersions.push(item);
         }
       }
-
-      // --- 评审会议纪要（来自 spec_documents，按 doc_type 区分） ---
-      const meetings = db.prepare(
-        "SELECT id, version, file_name, file_path, notes as meeting_name, meeting_date, created_at FROM spec_documents WHERE doc_type='meeting_minutes' AND (? IS NULL OR version=?) ORDER BY meeting_date DESC, created_at DESC"
-      ).all(version || null, version || null);
-      const meetingsByVersion = {};
-      for (const m of meetings) {
-        if (!meetingsByVersion[m.version]) meetingsByVersion[m.version] = [];
-        meetingsByVersion[m.version].push(m);
+      for (const g of groups.values()) {
+        g.meetings.sort((a, b) => (b.meeting_date || '').localeCompare(a.meeting_date || '') || a.file_name.localeCompare(b.file_name));
+        g.wordVersions.sort((a, b) => a.file_name.localeCompare(b.file_name));
+        g.signedScans.sort((a, b) => a.file_name.localeCompare(b.file_name));
       }
 
-      // 补全 matched_systems 中缺乏排期数据的系统，确保它们在树中可见
-      for (const verObj of versionMap.values()) {
-        for (const spec of verObj.docMap.values()) {
-          const docSystems = (spec.matched_systems || '').split(',').map(s => s.trim()).filter(Boolean);
-          for (const sys of docSystems) {
-            if (!spec.systems.has(sys)) {
-              spec.systems.set(sys, { name: sys, orders: new Map() });
-            }
-          }
-        }
-      }
-
-      // 组装输出
       const allVersions = config.getCategory('version');
       const versionOrder = allVersions.reduce((acc, v, i) => { acc[v] = i; return acc; }, {});
       const sorted = [], unsorted = [];
-
-      for (const verObj of versionMap.values()) {
-        const entry = { version: verObj.version, documents: [], meetings: meetingsByVersion[verObj.version] || [] };
-        for (const spec of verObj.docMap.values()) {
-          const systemsArr = [];
-          for (const sys of spec.systems.values()) {
-            const ordersArr = [];
-            for (const order of sys.orders.values()) ordersArr.push(order);
-            ordersArr.sort((a, b) => a.order_number.localeCompare(b.order_number));
-            systemsArr.push({ name: sys.name, orders: ordersArr });
-          }
-          systemsArr.sort((a, b) => a.name.localeCompare(b.name));
-          entry.documents.push({ id: spec.id, file_name: spec.file_name, version: spec.version, matched_systems: spec.matched_systems, auto_matched: spec.auto_matched, allSystems: systemsArr });
-        }
-        entry.documents.sort((a, b) => a.file_name.localeCompare(b.file_name));
-        (verObj.version in versionOrder ? sorted[versionOrder[verObj.version]] = entry : unsorted.push(entry));
+      for (const g of groups.values()) {
+        if (g.version in versionOrder) sorted[versionOrder[g.version]] = g;
+        else unsorted.push(g);
       }
-
-      // 没有文档但有关联会议纪要的版本也要显示
-      for (const m of meetings) {
-        if (!versionMap.has(m.version)) {
-          (m.version in versionOrder ? sorted[versionOrder[m.version]] = { version: m.version, documents: [], meetings: meetingsByVersion[m.version] || [] } : null);
-        }
-      }
-
       const tree = sorted.filter(Boolean).concat(unsorted);
       res.json({ success: true, data: tree, filters: { versions: allVersions } });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   // ============================================================
-  // 需规文档查询（按版本/系统/部门/关键字）
-  // ============================================================
   app.get('/api/specs/query', (req, res) => {
     try {
       const db = getDatabase();
-      const { version, system, department, keyword, project_name, page = 1, pageSize = 20 } = req.query;
+      const { version, system, department, keyword, project_name, group_by, page = 1, pageSize = 20 } = req.query;
 
-      let sql = `
-        SELECT sd.*,
-          (SELECT GROUP_CONCAT(DISTINCT ro.order_number)
-           FROM spec_document_points sdp
-           JOIN requirement_points rp ON rp.id = sdp.point_id
-           JOIN requirement_orders ro ON ro.id = rp.order_id
-           WHERE sdp.spec_id = sd.id) as related_orders,
-          (SELECT GROUP_CONCAT(DISTINCT ro.department)
-           FROM spec_document_points sdp
-           JOIN requirement_points rp ON rp.id = sdp.point_id
-           JOIN requirement_orders ro ON ro.id = rp.order_id
-           WHERE sdp.spec_id = sd.id) as related_departments
-        FROM spec_documents sd
-        WHERE sd.doc_type='spec_doc'
-      `;
+      // 基础查询不带相关子查询，避免 COUNT 阶段对每行重复执行
+      let sql = "SELECT sd.* FROM spec_documents sd WHERE sd.doc_type='spec_doc'";
       const params = [];
       if (version) { sql += ' AND sd.version=?'; params.push(version); }
       if (system) { sql += ' AND sd.matched_systems LIKE ?'; params.push(`%${system}%`); }
@@ -217,17 +129,73 @@ module.exports = function (app) {
       sql += ' ORDER BY sd.version DESC, sd.file_name';
 
       const result = paginate(sql, params, parseInt(page), parseInt(pageSize));
+
+      // 仅对当前页批量补全关联需求单 / 部门，单次查询取代逐行子查询
+      const ids = result.items.map(x => x.id);
+      if (ids.length) {
+        const ph = ids.map(() => '?').join(',');
+        const relRows = db.prepare(`SELECT sdp.spec_id,
+            GROUP_CONCAT(DISTINCT ro.order_number) AS related_orders,
+            GROUP_CONCAT(DISTINCT ro.department) AS related_departments
+          FROM spec_document_points sdp
+          JOIN requirement_points rp ON rp.id = sdp.point_id
+          JOIN requirement_orders ro ON ro.id = rp.order_id
+          WHERE sdp.spec_id IN (${ph}) GROUP BY sdp.spec_id`).all(...ids);
+        const relMap = {};
+        relRows.forEach(r => { relMap[r.spec_id] = r; });
+        result.items.forEach(it => {
+          it.related_orders = relMap[it.id]?.related_orders || '';
+          it.related_departments = relMap[it.id]?.related_departments || '';
+        });
+      }
+
+      // 仿排期查询：对当前页分组（口径与 /api/schedules/filter 一致）
+      let grouped = null;
+      if (group_by && group_by !== 'none') {
+        const first = v => String(v || '').split(/[,，、\s]+/).filter(Boolean)[0] || '未指定';
+        grouped = {};
+        result.items.forEach(s => {
+          let key;
+          if (group_by === 'version') key = s.version || '未指定';
+          else if (group_by === 'archive_category') key = s.archive_category || '未指定';
+          else if (group_by === 'department') key = first(s.related_departments);
+          else if (group_by === 'system') key = first(s.matched_systems);
+          else key = '其他';
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(s);
+        });
+      }
+
       const versions = config.getCategory('version');
       const systems = config.getCategory('system');
       const departments = config.getCategory('department');
       const usedProjects = db.prepare("SELECT DISTINCT project_name FROM ccb_schedules WHERE is_project=1 AND project_name IS NOT NULL AND project_name!='' ORDER BY project_name").all().map(r => r.project_name);
       const projects = [...new Set([...config.getCategory('project'), ...usedProjects])];
-      res.json({ success: true, ...result, filters: { versions, systems, departments, projects } });
+      res.json({ success: true, ...result, grouped, filters: { versions, systems, departments, projects } });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
+  // 扫描允许的文件类型：Word + Office 全套 + PDF
+  const ALLOWED_EXTS = new Set([
+    '.doc', '.docx', '.docm', '.dot', '.dotx', '.dotm', '.wps', '.rtf', '.odt',
+    '.xls', '.xlsx', '.xlsm', '.xlsb', '.et', '.ods',
+    '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp',
+    '.pdf'
+  ]);
+  // 归档仅三类：PDF → 签字扫描件；文件名含「评审/纪要」或旧 meetings/ 目录 → 评审会议纪要；其余 → word版本
+  const MEETING_KEYWORDS = ['评审', '纪要'];
+  function classifyArchiveFile(fileName, relPath) {
+    if (MEETING_KEYWORDS.some(k => fileName.includes(k)) || relPath.split(/[\\/]/).includes('meetings')) {
+      return { category: 'meeting_minutes', docType: 'meeting_minutes' };
+    }
+    if (path.extname(fileName).toLowerCase() === '.pdf') {
+      return { category: 'signed_scan', docType: 'spec_doc' };
+    }
+    return { category: 'word_version', docType: 'spec_doc' };
+  }
+
   // ============================================================
-  // 扫描目录（自动发现需规文档 + 评审会议纪要）
+  // 扫描目录（每个文件归入三类之一，已有记录按新规则覆盖）
   // ============================================================
   app.post('/api/specs/scan', (req, res) => {
     try {
@@ -239,102 +207,79 @@ module.exports = function (app) {
       const versionDir = path.join(specBaseDir, version);
       if (!fs.existsSync(versionDir) || !fs.statSync(versionDir).isDirectory()) {
         return res.json({ success: true, data: [], count: 0, meeting_count: 0, skipBecauseMissingVersionDir: true,
-          message: `需规目录中不存在版本「${version}」对应的文件夹。\n请将需规文档放入需规目录下的「${version}」子文件夹中，会议纪要放入「${version}/meetings/」子文件夹。\n\n当前需规目录: ${specBaseDir}` });
+          message: `需规目录中不存在版本「${version}」对应的文件夹。\n请将文件直接放入需规目录下的「${version}」子文件夹中，系统按文件名与扩展名归入三类：\n  · 文件名含「评审」或「纪要」（或旧 meetings/ 目录）→ 评审会议纪要\n  · PDF → 签字扫描件\n  · 其余 Word / Office 文件 → word版本\n  · 每个文件只保留一条归档记录，重复扫描会按当前规则覆盖旧记录\n\n当前需规目录: ${specBaseDir}` });
       }
 
-      const ALLOWED_EXTS = ['.docx', '.doc', '.pdf'];
-      const ALLOWED_EXTS_SET = new Set(ALLOWED_EXTS);
-      const SEP = path.sep;
-
-      // ---- 遍历版本目录，按路径分离需规文档和会议纪要 ----
-      const allFiles = walkDir(versionDir);
-      const specFiles = [], meetingFiles = [];
-      for (const filePath of allFiles) {
-        const ext = path.extname(filePath).toLowerCase();
-        if (!ALLOWED_EXTS_SET.has(ext)) continue;
+      // ---- 遍历版本目录并分类（每个文件恰好属于一类）----
+      const discovered = [];
+      for (const filePath of walkDir(versionDir)) {
+        const fileName = path.basename(filePath);
+        if (!ALLOWED_EXTS.has(path.extname(fileName).toLowerCase())) continue;
         const rel = path.relative(versionDir, filePath);
-        if (rel.startsWith('meetings' + SEP) || rel.startsWith('meetings/')) {
-          meetingFiles.push(filePath);
-        } else {
-          specFiles.push(filePath);
-        }
+        const { category, docType } = classifyArchiveFile(fileName, rel);
+        discovered.push({ file_name: fileName, file_path: filePath, category, docType });
       }
+      // 没有可归档文件时也不能提前返回：仍需清理该版本下文件已不存在的失效记录
+      // ---- 该版本的失效记录：磁盘文件已不存在 ----
+      const staleIds = db.prepare('SELECT id, file_path FROM spec_documents WHERE version=?').all(version)
+        .filter(r => !r.file_path || !fs.existsSync(path.resolve(r.file_path)))
+        .map(r => r.id);
 
       const allSystems = config.getCategory('system');
-
-      // ---- 处理需规文档 ----
-      const specDiscovered = [];
-      for (const filePath of specFiles) {
-        const fileName = path.basename(filePath);
-        const matchedSystems = allSystems.filter(sys => fileName.includes(sys));
-        specDiscovered.push({ file_name: fileName, file_path: filePath, matchedSystems, auto_matched: matchedSystems.length > 0 ? 1 : 0 });
-      }
-
-      // 预加载已有需规文档记录（保留手动匹配）
-      const existingSpecRecords = db.prepare("SELECT id, file_path, auto_matched, matched_systems FROM spec_documents WHERE version=? AND doc_type='spec_doc'").all(version);
-      const existingSpecMap = new Map();
-      for (const r of existingSpecRecords) existingSpecMap.set(path.resolve(r.file_path), r);
-
-      const delSpec = db.prepare('DELETE FROM spec_documents WHERE id=?');
-      const insSpec = db.prepare("INSERT INTO spec_documents (version, file_name, file_path, matched_systems, auto_matched, doc_type) VALUES (?,?,?,?,?,'spec_doc')");
-      const insPoint = db.prepare('INSERT OR IGNORE INTO spec_document_points (spec_id, point_id) VALUES (?,?)');
-
       const allScheduled = db.prepare('SELECT cs.point_id, cs.system FROM ccb_schedules cs WHERE cs.version = ?').all(version);
       const systemPointMap = {};
       for (const s of allScheduled) {
-        const systems = s.system.split(',').map(x => x.trim()).filter(Boolean);
-        for (const sys of systems) {
+        for (const sys of s.system.split(',').map(x => x.trim()).filter(Boolean)) {
           if (!systemPointMap[sys]) systemPointMap[sys] = new Set();
           systemPointMap[sys].add(s.point_id);
         }
       }
 
-      let autoCount = 0, manualPreserved = 0;
+      // 预加载全部已有记录，按解析后的绝对路径归集：同一文件可能残留多条（跨类别/路径写法不同）
+      const existingByPath = new Map();
+      for (const r of db.prepare('SELECT id, file_path FROM spec_documents').all()) {
+        const key = path.resolve(r.file_path);
+        if (!existingByPath.has(key)) existingByPath.set(key, []);
+        existingByPath.get(key).push(r.id);
+      }
+
+      const del = db.prepare('DELETE FROM spec_documents WHERE id=?');
+      const ins = db.prepare(`INSERT INTO spec_documents
+        (version, file_name, file_path, doc_type, archive_category, notes, matched_systems, auto_matched)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      const insPoint = db.prepare('INSERT OR IGNORE INTO spec_document_points (spec_id, point_id) VALUES (?,?)');
+
+      const counts = { meeting_minutes: 0, signed_scan: 0, word_version: 0 };
+      let staleCount = 0;
       db.transaction(() => {
-        for (const f of specDiscovered) {
-          const resolvedPath = path.resolve(f.file_path);
-          const existing = existingSpecMap.get(resolvedPath);
-          if (existing && existing.auto_matched === 0) { manualPreserved++; continue; }
-          if (existing) delSpec.run(existing.id);
-          const result = insSpec.run(version, f.file_name, f.file_path, f.matchedSystems.join(','), f.auto_matched);
-          const specId = result.lastInsertRowid; autoCount++;
-          if (f.auto_matched && f.matchedSystems.length > 0) {
+        // 先清理失效记录：磁盘文件已不在，其关联的需求点由外键级联删除
+        for (const id of staleIds) del.run(id);
+        staleCount = staleIds.length;
+
+        for (const f of discovered) {
+          const key = path.resolve(f.file_path);
+          // 唯一一条归档记录：先删除该文件所有旧记录（不论原类别），再按新规则插入
+          for (const id of existingByPath.get(key) || []) del.run(id);
+
+          const isMeeting = f.category === 'meeting_minutes';
+          const matchedSystems = isMeeting ? [] : allSystems.filter(sys => f.file_name.includes(sys));
+          const autoMatched = matchedSystems.length > 0 ? 1 : 0;
+          const notes = isMeeting ? path.basename(f.file_name, path.extname(f.file_name)) : '';
+          const result = ins.run(version, f.file_name, f.file_path, f.docType, f.category,
+            notes, matchedSystems.join(','), autoMatched);
+          counts[f.category]++;
+          if (autoMatched) {
             const pointIds = new Set();
-            for (const sys of f.matchedSystems) { if (systemPointMap[sys]) for (const pid of systemPointMap[sys]) pointIds.add(pid); }
-            for (const pid of pointIds) insPoint.run(specId, pid);
+            for (const sys of matchedSystems) { if (systemPointMap[sys]) for (const pid of systemPointMap[sys]) pointIds.add(pid); }
+            for (const pid of pointIds) insPoint.run(result.lastInsertRowid, pid);
           }
         }
       })();
 
-      // ---- 处理评审会议纪要 ----
-      const existingMeetingPaths = new Set(
-        db.prepare("SELECT file_path FROM spec_documents WHERE version=? AND doc_type='meeting_minutes'").all(version).map(r => path.resolve(r.file_path))
-      );
-      let meetingAutoCount = 0;
-      if (meetingFiles.length) {
-        const insMeeting = db.prepare("INSERT INTO spec_documents (version, file_name, file_path, doc_type, notes) VALUES (?,?,?,'meeting_minutes',?)");
-        db.transaction(() => {
-          for (const filePath of meetingFiles) {
-            if (existingMeetingPaths.has(path.resolve(filePath))) continue;
-            const fileName = path.basename(filePath);
-            const meetingName = path.basename(fileName, path.extname(fileName));
-            insMeeting.run(version, fileName, filePath, meetingName);
-            meetingAutoCount++;
-          }
-        })();
-      }
-
-      // ---- 组装返回 ----
-      let hasSpec = specDiscovered.length > 0, hasMeeting = meetingFiles.length > 0;
-      if (!hasSpec && !hasMeeting) {
-        return res.json({ success: true, data: [], count: 0, meeting_count: 0, message: '在版本目录中未发现需规文档或评审纪要' });
-      }
-
-      let msg = `扫描完成：${autoCount} 个文档已处理`;
-      if (meetingAutoCount > 0) msg += `，${meetingAutoCount} 份评审纪要已关联`;
-      if (manualPreserved > 0) msg += `，${manualPreserved} 个手动匹配文档已保留`;
-      if (autoCount === 0 && meetingAutoCount === 0 && manualPreserved > 0) msg = `扫描完成：${manualPreserved} 个手动匹配文档已保留，未发现新文件`;
-      res.json({ success: true, data: specDiscovered, count: autoCount, meeting_count: meetingAutoCount, message: msg });
+      const msg = `扫描完成：签字扫描件 ${counts.signed_scan} 份，word版本 ${counts.word_version} 个，评审会议纪要 ${counts.meeting_minutes} 份（每个文件仅保留一条归档记录，旧记录已按当前规则覆盖）`
+        + (staleCount > 0 ? `；已清理 ${staleCount} 条文件已不存在的失效记录` : '');
+      res.json({ success: true, data: discovered, count: counts.word_version + counts.signed_scan,
+        meeting_count: counts.meeting_minutes, counts, stale_count: staleCount, message: msg });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 

@@ -14,7 +14,7 @@ start.bat
 
 # Build standalone Windows executable
 npm run build
-# Output: Release/需求单信息管理系统.exe
+# Output: Release/我的工作平台.exe
 
 # Install dependencies (if node_modules missing)
 npm install --production --no-audit --no-fund
@@ -22,7 +22,7 @@ npm install --production --no-audit --no-fund
 
 ## Architecture
 
-**需求单信息管理系统 (Requirement Order Management System)** — a full-stack SPA for tracking IT requirement orders through CCB (Change Control Board) scheduling. Single-page frontend, Express backend, SQLite storage.
+**我的工作平台 (My Workspace)** — a full-stack SPA for tracking IT requirement orders through CCB (Change Control Board) scheduling. Single-page frontend, Express backend, SQLite storage.
 
 ### Stack
 - **Backend**: Node.js + Express 4 (port 3000)

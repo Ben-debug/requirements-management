@@ -1,5 +1,5 @@
 /**
- * 需求单信息管理系统 — 主入口
+ * 我的工作平台 — 主入口
  *
  * 职责：
  * 1. 全局 state 定义
@@ -14,7 +14,8 @@
 const state = {
   currentPage: 'orders', orders: [], currentOrder: null, meetings: [],
   editingOrderId: null, editingPointId: null, editingMeetingId: null, editingScheduleId: null,
-  orderPage: 1, schedulePage: 1, specPage: 1
+  orderPage: 1, schedulePage: 1, specPage: 1,
+  meetingFilterOptions: null
 };
 
 // ============================================================
@@ -22,7 +23,11 @@ const state = {
 // 此处负责将它们的函数注册到 window（供 HTML onclick 属性调用）
 // ============================================================
 
+// ---- api.js ----
+window.logout = logout;
+
 // ---- config.js ----
+window.switchConfigTab = switchConfigTab;
 window.loadConfig = loadConfig;
 window.showAddConfig = showAddConfig;
 window.addConfigItem = addConfigItem;
@@ -35,6 +40,7 @@ window.browseDir = browseDir;
 window.loadTemplateStatus = loadTemplateStatus;
 window.uploadTemplate = uploadTemplate;
 window.deleteTemplate = deleteTemplate;
+window.changePassword = changePassword;
 window.loadDropdowns = loadDropdowns;
 window.loadRelatedDeptCheckboxes = loadRelatedDeptCheckboxes;
 window.onDeptChange = onDeptChange;
@@ -82,7 +88,9 @@ window.openEditScheduleModalFromMeeting = openEditScheduleModalFromMeeting;
 window.toggleProjectRow = toggleProjectRow;
 window.createProjectFor = createProjectFor;
 window.batchGenerateAssessments = batchGenerateAssessments;
-window.loadBatchScheduleTable = loadBatchScheduleTable;
+window.openUnscheduledModal = openUnscheduledModal;
+window.switchUnscheduledDept = switchUnscheduledDept;
+window.gotoUnscheduledPage = gotoUnscheduledPage;
 window.saveBatchSchedules = saveBatchSchedules;
 window.toggleScheduleOrder = toggleScheduleOrder;
 window.toggleOrderPoints = toggleOrderPoints;

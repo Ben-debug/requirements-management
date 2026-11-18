@@ -74,11 +74,8 @@ async function loadFiles() {
       d.filters.departments.forEach(dep => { const o = document.createElement('option'); o.value = dep; o.textContent = dep; deptSel.appendChild(o); });
     }
     const projSel = document.getElementById('file-filter-project');
-    if (projSel) {
-      const current = projSel.value;
-      projSel.innerHTML = '<option value="">全部项目</option>';
-      (d.filters?.projects || []).forEach(name => { const o = document.createElement('option'); o.value = name; o.textContent = name; projSel.appendChild(o); });
-      if (current && Array.from(projSel.options).some(o => o.value === current)) projSel.value = current;
+    if (projSel && projSel.options.length <= 1 && d.filters?.projects) {
+      d.filters.projects.forEach(name => { const o = document.createElement('option'); o.value = name; o.textContent = name; projSel.appendChild(o); });
     }
 
     const groupsContainer = document.getElementById('files-groups');

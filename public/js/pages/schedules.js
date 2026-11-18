@@ -14,7 +14,6 @@ async function viewMeeting(id) {
   document.getElementById('schedule-meeting-file').textContent = d.file_name || '无';
   renderMeetingSchedules(d.schedules || []);
   await loadDropdowns();
-  await loadBatchScheduleTable();
   openModal('schedule-modal');
   scanAndLinkMeetingFiles(id);
 }
@@ -37,92 +36,169 @@ function renderMeetingSchedules(schedules) {
   c.innerHTML = renderScheduleHierarchy(schedules, s => renderScheduledCard(s, { showActions: true }));
 }
 
-// ---- 批量排期：加载待排期表 ----
-async function loadBatchScheduleTable() {
-  const c = document.getElementById('schedule-batch-table');
+// ---- 待排期需求点（三级弹窗，部门 tab + 分页按需加载）----
+const batchState = {
+  activeDept: '全部', page: 1, pageSize: 50,
+  selections: {},   // pointId -> { checked, order_id, system:[], version, sub_batch }
+  config: null,     // { sys:[], ver:[] }
+  counts: {}, departments: [], allCount: 0,
+  bound: false
+};
+
+async function openUnscheduledModal() {
+  batchState.activeDept = '全部';
+  batchState.page = 1;
+  batchState.selections = {};
+  document.getElementById('unscheduled-meeting-name').textContent =
+    document.getElementById('schedule-meeting-name').textContent || '';
+  if (!batchState.config) {
+    const [s, v] = await Promise.all([api('/api/config/system'), api('/api/config/version')]);
+    batchState.config = { sys: s.data || [], ver: v.data || [] };
+  }
+  if (!batchState.bound) {
+    const modal = document.getElementById('unscheduled-points-modal');
+    modal.addEventListener('change', captureBatchSelection);
+    modal.addEventListener('input', captureBatchSelection);
+    batchState.bound = true;
+  }
+  openModal('unscheduled-points-modal');
+  await loadUnscheduledTab('全部', 1);
+}
+
+function captureBatchSelection(e) {
+  const row = e.target.closest('.batch-point-item');
+  if (!row) return;
+  const cb = row.querySelector('.point-cb');
+  if (!cb) return;
+  batchState.selections[cb.value] = {
+    checked: cb.checked,
+    order_id: parseInt(cb.dataset.order),
+    system: Array.from(row.querySelectorAll('.sys-cb:checked')).map(x => x.value),
+    version: row.querySelector('.ver-select')?.value || '',
+    sub_batch: row.querySelector('.batch-input')?.value.trim() || ''
+  };
+}
+
+function renderBatchDeptTabs() {
+  const c = document.getElementById('unscheduled-dept-tabs');
+  if (!c) return;
+  const tabs = [{ name: '全部', count: batchState.allCount }];
+  batchState.departments.forEach(d => tabs.push({ name: d, count: batchState.counts[d] || 0 }));
+  if (batchState.counts['未指定'] > 0) tabs.push({ name: '未指定', count: batchState.counts['未指定'] });
+  c.innerHTML = tabs.map(t =>
+    `<div class="tab-item ${t.name === batchState.activeDept ? 'active' : ''}" data-dept="${esc(t.name)}" onclick="switchUnscheduledDept(this.getAttribute('data-dept'))">${esc(t.name)} <span class="tab-count">${t.count}</span></div>`
+  ).join('');
+}
+
+async function loadUnscheduledTab(dept, page) {
+  batchState.activeDept = dept;
+  batchState.page = page;
+  const c = document.getElementById('unscheduled-points-list');
   try {
-    const [points, sysOpts, verOpts] = await Promise.all([
-      api('/api/unscheduled-points'), api('/api/config/system'), api('/api/config/version')
-    ]);
-    const pts = points.data || points, sys = sysOpts.data || sysOpts, ver = verOpts.data || verOpts;
-    if (!pts.length) { c.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>所有需求点已完成排期</p></div>'; return; }
-
-    const orderGroups = {};
-    pts.forEach(p => {
-      const key = p.order_number;
-      if (!orderGroups[key]) orderGroups[key] = { order_number: p.order_number, order_name: p.order_name, points: [] };
-      orderGroups[key].points.push(p);
-    });
-    const sortedOrderKeys = Object.keys(orderGroups).sort((a, b) => {
-      const aLetter = a.charAt(0), bLetter = b.charAt(0);
-      if (aLetter !== bLetter) return aLetter < bLetter ? -1 : 1;
-      return parseInt(a.substring(1)) - parseInt(b.substring(1));
-    });
-
-    let html = '<div id="schedule-order-list">';
-    sortedOrderKeys.forEach(okey => {
-      const grp = orderGroups[okey];
-      const pts = grp.points;
-      html += `<div class="schedule-order-card" data-order="${pts[0].order_id}" data-order-number="${esc(okey)}">
-        <div class="schedule-order-header" onclick="toggleScheduleOrder(this)">
-          <div class="header-left">
-            <input type="checkbox" class="order-select-all" onclick="event.stopPropagation();toggleOrderPoints(this)" title="全选本单">
-            <span class="schedule-order-arrow">▶</span>
-            <span style="font-weight:600;font-size:14px;color:#1890ff">${esc(okey)}</span>
-            <span style="font-size:13px;color:#333;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(grp.order_name)}</span>
-            <span class="badge badge-blue">${pts.length}个待排期</span>
-          </div>
-          <div class="header-right"><span style="font-size:11px;color:#999">点击展开</span><span class="schedule-order-arrow" style="font-size:14px">▶</span></div>
-        </div>
-        <div class="schedule-order-body">`;
-
-      const batched = {}, unbatched = [];
-      pts.forEach(p => {
-        if (p.sub_batch) { if (!batched[p.sub_batch]) batched[p.sub_batch] = []; batched[p.sub_batch].push(p); }
-        else { unbatched.push(p); }
-      });
-
-      Object.keys(batched).sort().forEach(batch => {
-        const bpts = batched[batch];
-        const batchLabel = okey + '-' + batch;
-        html += `<div class="batch-sub-card" style="border:1px solid #e8e8e8;border-radius:6px;margin-bottom:8px;overflow:hidden;background:#fff">
-          <div class="batch-sub-header" onclick="toggleBatchBody(this)" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0f5ff;border-left:3px solid #1890ff;user-select:none">
-            <span class="batch-expand-arrow" style="font-size:12px;color:#999;transition:transform .2s;width:14px;text-align:center">▶</span>
-            <input type="checkbox" class="point-cb batch-selector" value="${bpts[0].id}" data-order="${bpts[0].order_id}" data-batch="${batch}" onclick="event.stopPropagation();toggleBatchPoints(this)">
-            <span style="font-weight:600;font-size:13px;color:#1890ff">📁 ${esc(batchLabel)}</span>
-            <span class="badge badge-blue">${bpts.length}项</span>
-            <span style="font-size:11px;color:#999;margin-left:auto">点击展开逐点设置</span>
-          </div>
-          <div class="batch-sub-body" style="display:none;padding:6px 10px 10px">`;
-        bpts.forEach(p => {
-          html += renderBatchSchedulePointRow(p, sys, ver, okey, batch);
-        });
-        html += `</div></div>`;
-      });
-
-      if (unbatched.length) {
-        if (Object.keys(batched).length) {
-          html += `<div style="padding:6px 0;font-size:12px;color:#999">📄 基础需求点（无子单，可录入批次号）</div>`;
-        }
-        unbatched.forEach(p => {
-          html += renderBatchSchedulePointRow(p, sys, ver, okey, '');
-        });
-      }
-
-      html += `</div></div>`;
-    });
-    html += '</div><div style="margin-top:16px"><button class="btn btn-primary" onclick="saveBatchSchedules()">💾 批量保存排期</button></div>';
-    c.innerHTML = html;
+    const params = new URLSearchParams({ page: page, pageSize: batchState.pageSize });
+    if (dept && dept !== '全部') params.set('department', dept);
+    const r = await api('/api/unscheduled-points?' + params.toString());
+    batchState.counts = r.departmentCounts || {};
+    batchState.departments = (r.filters && r.filters.departments) || [];
+    batchState.allCount = r.allCount || 0;
+    renderBatchDeptTabs();
+    const pts = r.data || [];
+    if (!pts.length) {
+      c.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>该范围内没有待排期需求点</p></div>';
+    } else {
+      c.innerHTML = buildBatchTableHTML(pts, batchState.config.sys, batchState.config.ver);
+    }
+    renderPagination('unscheduled-pagination', r, 'gotoUnscheduledPage');
   } catch (e) { c.innerHTML = '<div style="padding:12px;color:#999">加载失败</div>'; }
 }
 
-function renderBatchSchedulePointRow(p, sys, ver, okey, batch) {
+function switchUnscheduledDept(dept) { loadUnscheduledTab(dept, 1); }
+function gotoUnscheduledPage(p) {
+  const sizeSel = document.querySelector('#unscheduled-pagination select');
+  if (sizeSel) batchState.pageSize = parseInt(sizeSel.value) || 50;
+  loadUnscheduledTab(batchState.activeDept, p);
+}
+
+function isSelected(pointId) {
+  const s = batchState.selections[pointId];
+  return !!(s && s.checked);
+}
+
+function buildBatchTableHTML(pts, sys, ver) {
+  const orderGroups = {};
+  pts.forEach(p => {
+    const key = p.order_number;
+    if (!orderGroups[key]) orderGroups[key] = { order_number: p.order_number, order_name: p.order_name, points: [] };
+    orderGroups[key].points.push(p);
+  });
+  const sortedOrderKeys = Object.keys(orderGroups).sort((a, b) => {
+    const aLetter = a.charAt(0), bLetter = b.charAt(0);
+    if (aLetter !== bLetter) return aLetter < bLetter ? -1 : 1;
+    return parseInt(a.substring(1)) - parseInt(b.substring(1));
+  });
+
+  let html = '<div id="schedule-order-list">';
+  sortedOrderKeys.forEach(okey => {
+    const grp = orderGroups[okey];
+    const orderPts = grp.points;
+    const orderChecked = orderPts.every(p => isSelected(p.id));
+    html += `<div class="schedule-order-card" data-order="${orderPts[0].order_id}" data-order-number="${esc(okey)}">
+      <div class="schedule-order-header" onclick="toggleScheduleOrder(this)">
+        <div class="header-left">
+          <input type="checkbox" class="order-select-all" ${orderChecked ? 'checked' : ''} onclick="event.stopPropagation();toggleOrderPoints(this)" title="全选本单">
+          <span class="schedule-order-arrow">▶</span>
+          <span style="font-weight:600;font-size:14px;color:#1890ff">${esc(okey)}</span>
+          <span style="font-size:13px;color:#333;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(grp.order_name)}</span>
+          <span class="badge badge-blue">${orderPts.length}个待排期</span>
+        </div>
+        <div class="header-right"><span style="font-size:11px;color:#999">点击展开</span><span class="schedule-order-arrow" style="font-size:14px">▶</span></div>
+      </div>
+      <div class="schedule-order-body">`;
+
+    const batched = {}, unbatched = [];
+    orderPts.forEach(p => {
+      if (p.sub_batch) { if (!batched[p.sub_batch]) batched[p.sub_batch] = []; batched[p.sub_batch].push(p); }
+      else { unbatched.push(p); }
+    });
+
+    Object.keys(batched).sort().forEach(batch => {
+      const bpts = batched[batch];
+      const batchLabel = okey + '-' + batch;
+      const batchChecked = bpts.every(p => isSelected(p.id));
+      html += `<div class="batch-sub-card" style="border:1px solid #e8e8e8;border-radius:6px;margin-bottom:8px;overflow:hidden;background:#fff">
+        <div class="batch-sub-header" onclick="toggleBatchBody(this)" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0f5ff;border-left:3px solid #1890ff;user-select:none">
+          <span class="batch-expand-arrow" style="font-size:12px;color:#999;transition:transform .2s;width:14px;text-align:center">▶</span>
+          <input type="checkbox" class="point-cb batch-selector" value="${bpts[0].id}" data-order="${bpts[0].order_id}" data-batch="${batch}" ${batchChecked ? 'checked' : ''} onclick="event.stopPropagation();toggleBatchPoints(this)">
+          <span style="font-weight:600;font-size:13px;color:#1890ff">📁 ${esc(batchLabel)}</span>
+          <span class="badge badge-blue">${bpts.length}项</span>
+          <span style="font-size:11px;color:#999;margin-left:auto">点击展开逐点设置</span>
+        </div>
+        <div class="batch-sub-body" style="display:none;padding:6px 10px 10px">`;
+      bpts.forEach(p => { html += renderBatchSchedulePointRow(p, sys, ver, okey, batch, batchState.selections[p.id]); });
+      html += `</div></div>`;
+    });
+
+    if (unbatched.length) {
+      if (Object.keys(batched).length) {
+        html += `<div style="padding:6px 0;font-size:12px;color:#999">📄 基础需求点（无子单，可录入批次号）</div>`;
+      }
+      unbatched.forEach(p => { html += renderBatchSchedulePointRow(p, sys, ver, okey, '', batchState.selections[p.id]); });
+    }
+    html += `</div></div>`;
+  });
+  return html + '</div>';
+}
+
+function renderBatchSchedulePointRow(p, sys, ver, okey, batch, sel) {
+  sel = sel || {};
   const descId = 'bd-' + p.id;
   const isLong = p.description && p.description.length > 60;
-  const batchInput = batch ? `value="${esc(batch)}"` : 'placeholder="子单号"';
+  const batchValue = sel.sub_batch || batch;
+  const batchInput = batchValue ? `value="${esc(batchValue)}"` : 'placeholder="子单号"';
+  const selectedSystems = sel.system || [];
   return `<div class="batch-point-item" style="border:1px solid #f0f0f0;border-radius:6px;margin-bottom:6px;padding:8px 10px;background:#fff">
     <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px">
-      <input type="checkbox" class="point-cb" value="${p.id}" data-order="${p.order_id}" style="margin-top:3px">
+      <input type="checkbox" class="point-cb" value="${p.id}" data-order="${p.order_id}" ${sel.checked ? 'checked' : ''} style="margin-top:3px">
       <span class="point-number" style="font-size:12px;white-space:nowrap">${esc(p.point_number)}</span>
       <input type="text" class="batch-input" ${batchInput} style="width:62px;padding:1px 4px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px">
       <div style="flex:1;min-width:0">
@@ -132,9 +208,9 @@ function renderBatchSchedulePointRow(p, sys, ver, okey, batch) {
     </div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:24px">
       <span style="font-size:11px;color:#999;white-space:nowrap">涉及系统:</span>
-      <div style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="sys-cb" value="${s}" style="width:11px;height:11px">${s}</label>`).join('')}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:2px">${sys.map(s => `<label style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border:1px solid #d9d9d9;border-radius:3px;cursor:pointer;font-size:11px;background:#fff"><input type="checkbox" class="sys-cb" value="${esc(s)}" ${selectedSystems.includes(s) ? 'checked' : ''} style="width:11px;height:11px">${esc(s)}</label>`).join('')}</div>
       <span style="font-size:11px;color:#999;white-space:nowrap">上线版本:</span>
-      <select class="ver-select" style="padding:2px 6px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px;min-width:90px"><option value="">请选择</option>${ver.map(v => `<option value="${v}">${v}</option>`).join('')}</select>
+      <select class="ver-select" style="padding:2px 6px;border:1px solid #d9d9d9;border-radius:3px;font-size:11px;min-width:90px"><option value="">请选择</option>${ver.map(v => `<option value="${esc(v)}" ${sel.version === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
     </div>
   </div>`;
 }
@@ -142,26 +218,17 @@ function renderBatchSchedulePointRow(p, sys, ver, okey, batch) {
 // ---- 批量排期保存 ----
 async function saveBatchSchedules() {
   const meetingId = document.getElementById('schedule-meeting-id').value;
-  const checkboxes = document.querySelectorAll('.point-cb:checked');
   const schedules = [];
-  const seenPointIds = new Set();
+  Object.entries(batchState.selections).forEach(([pointId, s]) => {
+    if (!s.checked || !s.system || !s.system.length || !s.version) return;
+    schedules.push({
+      order_id: s.order_id, point_id: parseInt(pointId),
+      system: s.system.join(','), version: s.version,
+      sub_batch: s.sub_batch || undefined
+    });
+  });
 
-  for (const cb of checkboxes) {
-    const row = cb.closest('.batch-point-item');
-    if (!row) continue;
-    const systems = Array.from(row.querySelectorAll('.sys-cb:checked')).map(cb => cb.value);
-    const version = row.querySelector('.ver-select')?.value;
-    if (!systems.length || !version) continue;
-    const point_id = parseInt(cb.value);
-    const order_id = parseInt(cb.dataset.order);
-    if (seenPointIds.has(point_id)) continue;
-    seenPointIds.add(point_id);
-    const subBatchInput = row.querySelector('.batch-input');
-    const subBatch = subBatchInput ? subBatchInput.value.trim() : '';
-    schedules.push({ order_id, point_id, system: systems.join(','), version, sub_batch: subBatch || undefined });
-  }
-
-  if (!schedules.length) { showToast('请勾选并完善', 'error'); return; }
+  if (!schedules.length) { showToast('请勾选需求点并选择系统与版本', 'error'); return; }
   try {
     const r = await fetch(`/api/meetings/${meetingId}/schedules/batch`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedules })
@@ -169,6 +236,8 @@ async function saveBatchSchedules() {
     const d = await r.json();
     if (!d.success) throw new Error(d.message);
     showToast(`成功添加 ${d.data.count} 个`, 'success');
+    closeModal('unscheduled-points-modal');
+    batchState.selections = {};
     viewMeeting(meetingId);
   } catch (e) { showToast(e.message, 'error'); }
 }

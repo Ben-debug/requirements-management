@@ -12,6 +12,10 @@ async function loadMeetings() {
       const open = m.file_name
         ? fileOpenInfo({ id: m.id, file_name: m.file_name }, `/api/meetings/${m.id}/file`)
         : null;
+      const sm = m.schedule_summary || { points: 0, projects: 0 };
+      const summaryHtml = sm.points
+        ? `<div class="sched-meta">📊 排期概要：${sm.points} 个需求点 · ${sm.orders} 张需求单 · ${sm.departments} 个部门 · ${sm.systems} 个系统 · ${sm.versions} 个版本${sm.projects ? ` <span class="badge badge-orange">📋 立项 ${sm.projects}</span>` : ''}</div>`
+        : '<div class="sched-meta" style="color:#999">📊 暂无排期</div>';
       return `<div class="schedule-card">
         <div class="sched-header">
           <div class="sched-title">${esc(m.meeting_name)}</div>
@@ -22,6 +26,7 @@ async function loadMeetings() {
           </div>
         </div>
         <div class="sched-meta">日期: ${m.meeting_date}${m.notes ? ' | ' + esc(m.notes) : ''}</div>
+        ${summaryHtml}
         ${open ? `<div class="sched-tags"><span class="sched-tag">📎 <a href="${open.url}" style="color:#333;text-decoration:none" target="_blank" title="${open.title}">${esc(m.file_name)}</a></span>${open.previewable ? `<a href="${open.downloadUrl}" target="_blank" style="font-size:12px;color:#1890ff" title="下载纪要文件">📥 下载</a>` : ''}</div>` : ''}
       </div>`;
     }).join('');

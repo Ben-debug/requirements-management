@@ -22,7 +22,23 @@ module.exports = function (app) {
   app.get('/api/meetings', (req, res) => {
     try {
       const db = getDatabase();
-      res.json({ success: true, data: db.prepare('SELECT * FROM ccb_meetings ORDER BY meeting_date DESC').all() });
+      // 一次聚合查询取得每场会议的排期概要，避免逐会议查询
+      const summaryRows = db.prepare(`SELECT cs.meeting_id,
+          COUNT(*) AS points,
+          COUNT(DISTINCT cs.order_id) AS orders,
+          COUNT(DISTINCT ro.department) AS departments,
+          COUNT(DISTINCT cs.system) AS systems,
+          COUNT(DISTINCT cs.version) AS versions,
+          SUM(COALESCE(cs.is_project, 0)) AS projects
+        FROM ccb_schedules cs
+        JOIN requirement_orders ro ON ro.id = cs.order_id
+        GROUP BY cs.meeting_id`).all();
+      const summaryMap = {};
+      summaryRows.forEach(r => { summaryMap[r.meeting_id] = r; });
+      const zero = { points: 0, orders: 0, departments: 0, systems: 0, versions: 0, projects: 0 };
+      const meetings = db.prepare('SELECT * FROM ccb_meetings ORDER BY meeting_date DESC').all()
+        .map(m => ({ ...m, schedule_summary: summaryMap[m.id] || zero }));
+      res.json({ success: true, data: meetings });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 

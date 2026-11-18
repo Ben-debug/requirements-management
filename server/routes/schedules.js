@@ -4,6 +4,7 @@
  */
 const { getDatabase } = require('../database');
 const config = require('../config');
+const { paginate } = require('../utils');
 
 module.exports = function (app) {
 
@@ -71,13 +72,41 @@ module.exports = function (app) {
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
-  // ---- 待排期需求点 ----
+  // ---- 待排期需求点（部门筛选 + 分页，按需加载）----
   app.get('/api/unscheduled-points', (req, res) => {
     try {
       const db = getDatabase();
+      const { department, page = 1, pageSize = 50 } = req.query;
+      const where = 'rp.id NOT IN (SELECT point_id FROM ccb_schedules)';
+      const params = [];
+      let extra = '';
+      if (department && department !== '全部') {
+        if (department === '未指定') {
+          extra = " AND (ro.department IS NULL OR ro.department='')";
+        } else {
+          extra = ' AND ro.department=?';
+          params.push(department);
+        }
+      }
+      const sql = `SELECT rp.*, ro.order_number, ro.name as order_name, ro.department
+        FROM requirement_points rp JOIN requirement_orders ro ON rp.order_id=ro.id
+        WHERE ${where}${extra}
+        ORDER BY SUBSTR(ro.order_number, 1, 1), CAST(SUBSTR(ro.order_number, 2) AS INTEGER), rp.point_number`;
+      const result = paginate(sql, params, parseInt(page) || 1, parseInt(pageSize) || 50);
+
+      // 部门计数基于全量待排期集合（不受当前部门筛选影响），供 tab 角标使用
+      const countRows = db.prepare(`SELECT COALESCE(NULLIF(ro.department,''),'未指定') AS dept, COUNT(*) AS c
+        FROM requirement_points rp JOIN requirement_orders ro ON rp.order_id=ro.id
+        WHERE ${where} GROUP BY dept`).all();
+      const departmentCounts = {};
+      countRows.forEach(r => { departmentCounts[r.dept] = r.c; });
+      const departments = config.getCategory('department');
+
       res.json({
-        success: true,
-        data: db.prepare(`SELECT rp.*, ro.order_number, ro.name as order_name FROM requirement_points rp JOIN requirement_orders ro ON rp.order_id=ro.id WHERE rp.id NOT IN (SELECT point_id FROM ccb_schedules) ORDER BY SUBSTR(ro.order_number, 1, 1), CAST(SUBSTR(ro.order_number, 2) AS INTEGER), rp.point_number`).all()
+        success: true, ...result, data: result.items,
+        departmentCounts,
+        allCount: Object.values(departmentCounts).reduce((a, b) => a + b, 0),
+        filters: { departments }
       });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });

@@ -88,22 +88,27 @@ module.exports = function (app) {
 
   // ---- 配置分类 CRUD ----
   app.get('/api/config', (req, res) => {
-    try { res.json({ success: true, data: config.getAll(), config_path: config.getConfigPath() }); }
-    catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    try {
+      const { auth, ...safe } = config.getAll();   // 不向前端暴露口令
+      res.json({ success: true, data: safe, config_path: config.getConfigPath() });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   app.post('/api/config', (req, res) => {
     try {
       const { category, label } = req.body;
       if (!category || !label) return res.status(400).json({ success: false, message: '不能为空' });
+      if (category === 'auth') return res.status(400).json({ success: false, message: '访问口令请通过登录页或参数配置页修改' });
       config.addItem(category, label);
       res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   app.delete('/api/config/:category/:label', (req, res) => {
-    try { config.deleteItem(req.params.category, req.params.label); res.json({ success: true }); }
-    catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    try {
+      if (req.params.category === 'auth') return res.status(400).json({ success: false, message: '访问口令请通过参数配置页修改' });
+      config.deleteItem(req.params.category, req.params.label); res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   // ---- 意向书评估表模板管理 ----
@@ -148,8 +153,10 @@ module.exports = function (app) {
 
   // 参数路由必须放在所有 /api/config/* 静态路由之后，否则会遮蔽具体路径
   app.get('/api/config/:category', (req, res) => {
-    try { res.json({ success: true, data: config.getCategory(req.params.category) }); }
-    catch (err) { res.status(500).json({ success: false, message: err.message }); }
+    try {
+      if (req.params.category === 'auth') return res.json({ success: true, data: [] });
+      res.json({ success: true, data: config.getCategory(req.params.category) });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
   // ---- 升级日志 ----

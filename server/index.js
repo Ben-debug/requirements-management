@@ -1,5 +1,5 @@
 /**
- * 需求单信息管理系统 — 主入口
+ * 我的工作平台 — 主入口
  *
  * 职责：Express 配置、目录初始化、路由注册、服务器启动
  * 路由逻辑已拆分到 server/routes/ 各模块
@@ -52,39 +52,18 @@ if (customDataDir) {
   }
 }
 
-// ---- 访问鉴权（Basic Auth）----
+// ---- 访问鉴权（登录页 + 签名 Cookie 会话；Basic Auth 仅作脚本备用）----
 // 必须挂在静态资源之前，否则首页和 JS/CSS 不受保护
-const crypto = require('crypto');
-const AUTH_USER = 'admin';
-let authPassword = config.getAuthPassword();
-if (!authPassword) {
-  authPassword = crypto.randomBytes(6).toString('hex');
-  config.setAuthPassword(authPassword);
-}
+const { authMiddleware } = require('./middleware/auth');
+app.use(authMiddleware);
+require('./routes/auth-routes')(app);
+
 console.log('\n============================================');
-console.log(`  访问认证  用户名: ${AUTH_USER}`);
-console.log(`            口令:   ${authPassword}`);
+console.log('  访问认证：已启用登录认证');
+console.log('  登录地址: /login（首次使用请在登录页设置口令）');
 console.log(`  局域网访问: http://<本机IP>:${PORT}`);
-console.log(`  修改口令: ${config.getConfigPath()} 的 auth.password（重启生效）`);
+console.log('  修改口令: 登录后到「参数配置 → 访问口令」');
 console.log('============================================\n');
-
-const deny = (res) => {
-  res.set('WWW-Authenticate', 'Basic realm="Requirement Manager", charset="UTF-8"');
-  return res.status(401).send('需要用户名和口令');
-};
-
-app.use((req, res, next) => {
-  const header = req.headers.authorization || '';
-  if (!header.startsWith('Basic ')) return deny(res);
-  const decoded = Buffer.from(header.slice(6).trim(), 'base64').toString('utf8');
-  const sep = decoded.indexOf(':');
-  if (sep < 0) return deny(res);
-  const user = decoded.slice(0, sep);
-  const pass = decoded.slice(sep + 1);
-  const hash = s => crypto.createHash('sha256').update(s).digest();
-  if (user === AUTH_USER && crypto.timingSafeEqual(hash(pass), hash(authPassword))) return next();
-  return deny(res);
-});
 
 // ---- 静态文件 ----
 app.use(express.static(path.join(ROOT_DIR, 'public'), { maxAge: 0, etag: false }));
@@ -142,7 +121,7 @@ app.use(fallbackHandler);
 // 启动服务器
 // ============================================================
 const server = app.listen(PORT, () => {
-  console.log(`需求单信息管理系统已启动: http://localhost:${PORT}`);
+  console.log(`我的工作平台已启动: http://localhost:${PORT}`);
   // Auto-open browser
   setTimeout(() => {
     try {

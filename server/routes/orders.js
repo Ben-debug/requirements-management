@@ -312,14 +312,29 @@ module.exports = function (app) {
       const kw = req.query.keyword || '';
       if (!kw.trim()) return res.json({ success: true, data: [] });
       const like = `%${kw}%`;
-      const orders = db.prepare(`SELECT DISTINCT ro.* FROM requirement_orders ro LEFT JOIN requirement_points rp ON ro.id=rp.order_id WHERE ro.order_number LIKE ? OR ro.name LIKE ? OR ro.department LIKE ? OR ro.proposer LIKE ? OR rp.description LIKE ? OR rp.point_number LIKE ? ORDER BY ro.created_at DESC`).all(like, like, like, like, like, like);
-      const result = [];
-      for (const order of orders) {
-        const allPoints = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(order.id);
-        const schedules = db.prepare(`SELECT cs.*, cm.meeting_name FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=?`).all(order.id);
-        const pointsWithSchedule = allPoints.map(p => { const s = schedules.find(x => x.point_id === p.id); return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null }; });
-        result.push({ ...order, matchedPoints: pointsWithSchedule });
+      // 限制结果条数，并批量取需求点/排期，避免每个订单各查两次（N+1）
+      const orders = db.prepare(`SELECT DISTINCT ro.* FROM requirement_orders ro LEFT JOIN requirement_points rp ON ro.id=rp.order_id WHERE ro.order_number LIKE ? OR ro.name LIKE ? OR ro.department LIKE ? OR ro.proposer LIKE ? OR rp.description LIKE ? OR rp.point_number LIKE ? ORDER BY ro.created_at DESC LIMIT 50`).all(like, like, like, like, like, like);
+      if (!orders.length) return res.json({ success: true, data: [] });
+      const ids = orders.map(o => o.id);
+      const ph = ids.map(() => '?').join(',');
+      const pointsByOrder = {};
+      for (const p of db.prepare(`SELECT * FROM requirement_points WHERE order_id IN (${ph}) ORDER BY point_number`).all(...ids)) {
+        if (!pointsByOrder[p.order_id]) pointsByOrder[p.order_id] = [];
+        pointsByOrder[p.order_id].push(p);
       }
+      const schedByOrder = {};
+      for (const s of db.prepare(`SELECT cs.*, cm.meeting_name FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id IN (${ph})`).all(...ids)) {
+        if (!schedByOrder[s.order_id]) schedByOrder[s.order_id] = [];
+        schedByOrder[s.order_id].push(s);
+      }
+      const result = orders.map(order => {
+        const schedules = schedByOrder[order.id] || [];
+        const matchedPoints = (pointsByOrder[order.id] || []).map(p => {
+          const s = schedules.find(x => x.point_id === p.id);
+          return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null };
+        });
+        return { ...order, matchedPoints };
+      });
       res.json({ success: true, data: result });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });

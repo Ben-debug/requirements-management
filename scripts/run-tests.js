@@ -1794,6 +1794,146 @@ test('AA. 版本改名', '仅改配置时历史版本保留原名', async () => 
   }
 });
 
+// ==================================================================
+// AB. 数据备份
+// ==================================================================
+test('AB. 数据备份', '创建备份生成数据库快照与配置，列表/下载/删除均可用', async () => {
+  const before = (await call('/api/backup/list')).json();
+  assert.equal(before.success, true);
+
+  const r = await call('/api/backup', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ include_uploads: false })
+  });
+  assert.equal(r.json().success, true, r.text);
+  const manifest = r.json().data;
+  assert.match(manifest.name, /^backup-\d{8}-\d{6}$/);
+  assert.equal(manifest.include_uploads, false);
+  assert.ok(manifest.size_bytes > 0);
+  const bdir = path.join(tmpRoot, 'backups', manifest.name);
+  assert.ok(fs.existsSync(path.join(bdir, 'requirements.db')), '应生成数据库快照');
+  assert.ok(fs.existsSync(path.join(bdir, 'config.json')), '应备份配置文件');
+  assert.ok(fs.existsSync(path.join(bdir, 'manifest.json')));
+
+  const list = (await call('/api/backup/list')).json();
+  assert.ok(list.data.some(b => b.name === manifest.name));
+
+  const dl = await call('/api/backup/' + encodeURIComponent(manifest.name) + '/download');
+  assert.equal(dl.status, 200);
+  assert.match(dl.headers.get('content-type') || '', /application\/zip/);
+  assert.ok(dl.text.length > 0);
+
+  const del = await call('/api/backup/' + encodeURIComponent(manifest.name), { method: 'DELETE' });
+  assert.equal(del.json().success, true);
+  assert.equal(fs.existsSync(bdir), false);
+  const after = (await call('/api/backup/list')).json();
+  assert.ok(!after.data.some(b => b.name === manifest.name));
+});
+
+test('AB. 数据备份', '拒绝非法备份名称', async () => {
+  const r = await call('/api/backup/..%5Cevil/download');
+  assert.equal(r.status, 400);
+  const d = await call('/api/backup/not-a-backup', { method: 'DELETE' });
+  assert.equal(d.status, 400);
+});
+
+// ==================================================================
+// AC. 数据库索引
+// ==================================================================
+test('AC. 数据库索引', '高频筛选与关联字段索引已建立且初始化幂等', () => {
+  const expected = [
+    'idx_ro_department', 'idx_ro_propose_date', 'idx_rp_order_id', 'idx_rp_version',
+    'idx_ff_order_id', 'idx_cs_order_id', 'idx_cs_point_id', 'idx_cs_meeting_id',
+    'idx_cs_version', 'idx_cs_project_name', 'idx_cm_meeting_name',
+    'idx_sd_version', 'idx_sd_matched_department', 'idx_sdp_point_id'
+  ];
+  const names = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'").all().map(r => r.name);
+  for (const name of expected) assert.ok(names.includes(name), '缺少索引：' + name);
+  assert.doesNotThrow(() => require('../server/schema.js').initDatabase(db), '重复初始化应幂等');
+});
+
+// ==================================================================
+// AD. 口令哈希与登录限流
+// ==================================================================
+test('AD. 口令安全', '口令以加盐哈希存储，明文不再落盘', () => {
+  const snapshot = cfgModule.snapshot();
+  try {
+    cfgModule.setAuthPassword('hash-test-pass');
+    const raw = fs.readFileSync(path.join(tmpRoot, 'config.json'), 'utf8');
+    assert.ok(!raw.includes('hash-test-pass'), '配置文件不应出现明文口令');
+    assert.match(raw, /scrypt\$/);
+    assert.equal(cfgModule.verifyPassword('hash-test-pass', cfgModule.getAuthPassword()), true);
+    assert.equal(cfgModule.verifyPassword('wrong-pass', cfgModule.getAuthPassword()), false);
+  } finally { cfgModule.restore(snapshot); }
+});
+
+test('AD. 口令安全', '旧明文口令登录成功后透明升级为哈希', async () => {
+  const snapshot = cfgModule.snapshot();
+  const authRoutes = require('../server/routes/auth-routes');
+  authRoutes.resetLoginAttempts();
+  try {
+    snapshot.auth = { password: PASSWORD };
+    cfgModule.restore(snapshot);
+    const r = await call('/api/auth/login', {
+      auth: null, method: 'POST', headers: jsonHeaders,
+      body: JSON.stringify({ username: 'admin', password: PASSWORD })
+    });
+    assert.equal(r.json().success, true);
+    const raw = fs.readFileSync(path.join(tmpRoot, 'config.json'), 'utf8');
+    assert.ok(!raw.includes(PASSWORD), '登录后应升级为哈希');
+    assert.match(raw, /scrypt\$/);
+  } finally {
+    cfgModule.restore(snapshot);
+    authRoutes.resetLoginAttempts();
+  }
+});
+
+test('AD. 口令安全', '连续失败 5 次后锁定，重置后可正常登录', async () => {
+  const authRoutes = require('../server/routes/auth-routes');
+  authRoutes.resetLoginAttempts();
+  const login = (password) => call('/api/auth/login', {
+    auth: null, method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ username: 'admin', password })
+  });
+  try {
+    for (let i = 0; i < 5; i++) assert.equal((await login('wrong')).status, 401);
+    assert.equal((await login(PASSWORD)).status, 429, '锁定后即使口令正确也应拒绝');
+  } finally { authRoutes.resetLoginAttempts(); }
+  assert.equal((await login(PASSWORD)).status, 200, '重置后应恢复登录');
+});
+
+// ==================================================================
+// AE. 搜索与目录遍历
+// ==================================================================
+test('AE. 搜索与遍历', '全局搜索限制 50 条并携带需求点', async () => {
+  const KEY = '全局搜索压测关键字XYZ';
+  const ins = db.prepare('INSERT INTO requirement_orders (order_number,name) VALUES (?,?)');
+  db.transaction(() => {
+    for (let i = 0; i < 55; i++) ins.run('SRCH' + String(i).padStart(3, '0'), KEY + '-' + i);
+  })();
+  try {
+    const r = (await call('/api/search?keyword=' + encodeURIComponent(KEY))).json();
+    assert.equal(r.success, true);
+    assert.equal(r.data.length, 50, '搜索结果应限制为 50 条');
+    assert.ok(r.data.every(o => Array.isArray(o.matchedPoints)), '每条结果都应带需求点数组');
+  } finally {
+    db.prepare("DELETE FROM requirement_orders WHERE order_number LIKE 'SRCH%'").run();
+  }
+});
+
+test('AE. 搜索与遍历', 'walkDir 跳过符号链接且不因单文件异常中断', () => {
+  const { walkDir } = require('../server/utils.js');
+  const root = path.join(tmpRoot, 'walk-test');
+  const sub = path.join(root, 'sub');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+  fs.writeFileSync(path.join(sub, 'b.txt'), 'b');
+  try { fs.symlinkSync(root, path.join(root, 'loop')); } catch (e) {}
+  const files = walkDir(root);
+  assert.equal(files.length, 2, '应只返回两个真实文件，符号链接环不应导致递归');
+  assert.ok(files.some(f => f.endsWith('a.txt')) && files.some(f => f.endsWith('b.txt')));
+  assert.deepEqual(walkDir(path.join(root, 'not-exist')), [], '不存在的目录应返回空数组');
+});
+
 // ------------------------------------------------------------------
 (async () => {
   let passed = 0, failed = 0;

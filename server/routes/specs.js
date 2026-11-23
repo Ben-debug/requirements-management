@@ -4,7 +4,7 @@
  */
 const { getDatabase } = require('../database');
 const config = require('../config');
-const { walkDir, paginate, sendFileInline, sendFileMissing, handleFileOpen } = require('../utils');
+const { walkDirAsync, paginate, sendFileInline, sendFileMissing, handleFileOpen } = require('../utils');
 const path = require('path');
 const fs = require('fs');
 
@@ -340,7 +340,7 @@ module.exports = function (app) {
 
   // 扫描目录（每个文件归入三类之一，已有记录按新规则覆盖）
   // ============================================================
-  app.post('/api/specs/scan', (req, res) => {
+  app.post('/api/specs/scan', async (req, res) => {
     try {
       const db = getDatabase();
       const { version } = req.body;
@@ -362,7 +362,7 @@ module.exports = function (app) {
 
       // ---- 遍历版本目录并分类（每个文件恰好属于一类）----
       const discovered = [];
-      for (const filePath of walkDir(versionDir)) {
+      for (const filePath of await walkDirAsync(versionDir)) {
         const fileName = path.basename(filePath);
         if (isTempOrSystemFile(fileName)) continue;
         if (!ALLOWED_EXTS.has(path.extname(fileName).toLowerCase())) continue;

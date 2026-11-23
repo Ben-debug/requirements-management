@@ -84,6 +84,24 @@ function initDatabase(db) {
     db.exec("UPDATE spec_documents SET archive_category='word_version' WHERE archive_category IS NULL OR archive_category=''");
   } catch (e) {}
   try { db.exec("ALTER TABLE flow_files ADD COLUMN deleted_at TEXT"); } catch (e) {}
+
+  // 高频筛选与关联字段索引：放在列迁移之后，旧库首次启动自动补齐
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ro_department ON requirement_orders(department);
+    CREATE INDEX IF NOT EXISTS idx_ro_propose_date ON requirement_orders(propose_date);
+    CREATE INDEX IF NOT EXISTS idx_rp_order_id ON requirement_points(order_id);
+    CREATE INDEX IF NOT EXISTS idx_rp_version ON requirement_points(version);
+    CREATE INDEX IF NOT EXISTS idx_ff_order_id ON flow_files(order_id);
+    CREATE INDEX IF NOT EXISTS idx_cs_order_id ON ccb_schedules(order_id);
+    CREATE INDEX IF NOT EXISTS idx_cs_point_id ON ccb_schedules(point_id);
+    CREATE INDEX IF NOT EXISTS idx_cs_meeting_id ON ccb_schedules(meeting_id);
+    CREATE INDEX IF NOT EXISTS idx_cs_version ON ccb_schedules(version);
+    CREATE INDEX IF NOT EXISTS idx_cs_project_name ON ccb_schedules(project_name);
+    CREATE INDEX IF NOT EXISTS idx_cm_meeting_name ON ccb_meetings(meeting_name);
+    CREATE INDEX IF NOT EXISTS idx_sd_version ON spec_documents(version);
+    CREATE INDEX IF NOT EXISTS idx_sd_matched_department ON spec_documents(matched_department);
+    CREATE INDEX IF NOT EXISTS idx_sdp_point_id ON spec_document_points(point_id);
+  `);
 }
 
 module.exports = { initDatabase };

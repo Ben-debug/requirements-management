@@ -437,6 +437,22 @@
         </div>
       </div>
     </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">💾 数据备份</span>
+        <div><span id="backup-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-backup">
+        <p style="font-size:13px;color:#999;margin-bottom:12px">备份包含数据库一致性快照与 <code>config.json</code>；可勾选同时备份上传文件。备份存放在数据目录下 <code>backups\</code>，可下载保存到其它机器。改名、批量导入等操作前建议先备份。</p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" id="backup-include-uploads"> 同时备份上传文件（可能较大）</label>
+          <button class="btn btn-primary" onclick="createBackup()" title="创建一份新的数据备份">💾 立即备份</button>
+          <button class="btn btn-sm" onclick="loadBackups()">↻ 刷新列表</button>
+          <span id="backup-status" style="font-size:13px;color:#999"></span>
+        </div>
+        <div id="backup-list"></div>
+      </div>
+    </div>
     </div>
   </div>
 </div>

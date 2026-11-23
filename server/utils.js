@@ -60,18 +60,37 @@ function paginate(sql, params, page, pageSize) {
 
 /**
  * 递归遍历目录，返回所有文件的完整路径数组
+ * 使用 withFileTypes 避免跟随符号链接造成死循环；单个条目异常只跳过，不让整次扫描失败
  */
-function walkDir(dir) {
+function walkDir(dir, maxDepth = 32) {
   const results = [];
-  const list = fs.readdirSync(dir);
-  for (const item of list) {
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    if (stat.isDirectory()) {
-      results.push(...walkDir(fullPath));
-    } else if (stat.isFile()) {
-      results.push(fullPath);
-    }
+  if (maxDepth < 0) return results;
+  let list;
+  try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return results; }
+  for (const entry of list) {
+    const fullPath = path.join(dir, entry.name);
+    try {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) results.push(...walkDir(fullPath, maxDepth - 1));
+      else if (entry.isFile()) results.push(fullPath);
+    } catch (e) { /* 跳过无法访问的条目 */ }
+  }
+  return results;
+}
+
+/** walkDir 的异步版本：扫描期间让出事件循环，避免局域网多人操作时界面卡顿 */
+async function walkDirAsync(dir, maxDepth = 32) {
+  const results = [];
+  if (maxDepth < 0) return results;
+  let list;
+  try { list = await fs.promises.readdir(dir, { withFileTypes: true }); } catch (e) { return results; }
+  for (const entry of list) {
+    const fullPath = path.join(dir, entry.name);
+    try {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) results.push(...await walkDirAsync(fullPath, maxDepth - 1));
+      else if (entry.isFile()) results.push(fullPath);
+    } catch (e) { /* 跳过无法访问的条目 */ }
   }
   return results;
 }
@@ -197,7 +216,7 @@ function handleFileOpen(req, res, filePath, fileName) {
 }
 
 module.exports = {
-  pad2, normalizeDate, paginate, walkDir, encodeName,
+  pad2, normalizeDate, paginate, walkDir, walkDirAsync, encodeName,
   PREVIEW_MIME, sendFileInline, isLocalClient, defaultAllowedRoots,
   revealInFolder, htmlEscape, sendFileMissing, handleFileOpen
 };

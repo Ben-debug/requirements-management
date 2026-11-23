@@ -56,8 +56,7 @@ function checkBasic(req, password) {
     if (sep < 0) return false;
     const user = decoded.slice(0, sep);
     const pass = decoded.slice(sep + 1);
-    const hash = s => crypto.createHash('sha256').update(s).digest();
-    return user === AUTH_USER && crypto.timingSafeEqual(hash(pass), hash(password));
+    return user === AUTH_USER && config.verifyPassword(pass, password);
   } catch (e) { return false; }
 }
 

@@ -57,6 +57,7 @@ async function loadConfig() {
   } catch (e) { console.error(e); }
   loadPaths();
   loadTemplateStatus();
+  loadBackups();
 }
 
 function showAddConfig(cat) {
@@ -392,4 +393,78 @@ async function deleteTemplate() {
     showToast('模板已删除', 'success');
     loadTemplateStatus();
   } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ---- 数据备份 ----
+function fmtBackupSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function loadBackups() {
+  const listEl = document.getElementById('backup-list');
+  const countEl = document.getElementById('backup-count');
+  const statusEl = document.getElementById('backup-status');
+  if (!listEl) return;
+  try {
+    const d = await api('/api/backup/list');
+    const items = d.data || [];
+    if (countEl) countEl.textContent = items.length + ' 份';
+    if (statusEl) statusEl.textContent = '';
+    if (!items.length) {
+      listEl.innerHTML = '<div style="padding:16px;color:#999;text-align:center;background:#fafafa;border-radius:6px">暂无备份</div>';
+      return;
+    }
+    listEl.innerHTML = items.map(b => {
+      const name = esc(b.name || '');
+      const time = String(b.created_at || '').replace('T', ' ').slice(0, 19);
+      const size = fmtBackupSize(b.size_bytes);
+      const tag = b.include_uploads ? '含上传文件' : '仅数据';
+      return `<div class="config-item" style="align-items:center">
+        <span>💾 ${name}<span style="font-size:12px;color:#999;margin-left:10px">${esc(time)} · ${size} · ${tag}</span></span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-sm" onclick="downloadBackup('${name}')">📥 下载</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteBackup('${name}')">删除</button>
+        </span></div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div style="padding:16px;color:#a8071a;text-align:center">无法加载备份列表：' + esc(e.message) + '</div>';
+  }
+}
+
+async function createBackup() {
+  const btn = document.querySelector('button[onclick="createBackup()"]');
+  const statusEl = document.getElementById('backup-status');
+  const include = !!(document.getElementById('backup-include-uploads') || {}).checked;
+  if (btn) { btn.disabled = true; btn.textContent = '备份中...'; }
+  if (statusEl) statusEl.textContent = '正在生成备份，请稍候...';
+  try {
+    const r = await api('/api/backup', {
+      method: 'POST',
+      body: JSON.stringify({ include_uploads: include })
+    });
+    showToast(r.message || '备份已创建', 'success');
+    if (statusEl) statusEl.textContent = '最近备份：' + (r.data ? r.data.name : '');
+    loadBackups();
+  } catch (e) {
+    showToast(e.message || '备份失败', 'error');
+    if (statusEl) statusEl.textContent = '❌ ' + (e.message || '备份失败');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 立即备份'; }
+  }
+}
+
+async function deleteBackup(name) {
+  if (!confirm('确定删除备份 ' + name + '？删除后无法恢复。')) return;
+  try {
+    await api('/api/backup/' + encodeURIComponent(name), { method: 'DELETE' });
+    showToast('备份已删除', 'success');
+    loadBackups();
+  } catch (e) { showToast(e.message || '删除失败', 'error'); }
+}
+
+function downloadBackup(name) {
+  location.href = '/api/backup/' + encodeURIComponent(name) + '/download';
 }

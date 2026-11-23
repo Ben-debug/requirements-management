@@ -110,6 +110,7 @@ require('./routes/specs')(app);
 require('./routes/config-routes')(app);
 require('./routes/import-export')(app);
 require('./routes/assessment')(app);
+require('./routes/backup-routes')(app);
 
 // ============================================================
 // 错误处理

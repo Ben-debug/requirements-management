@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const defaults = {
   department: ['交易中心', '清算部', '交割储运部'],
@@ -211,17 +212,46 @@ function getConfigPath() {
   return configPath();
 }
 
-/** 读取访问口令（config.json 的 auth.password） */
+/** 读取访问口令（config.json 的 auth.password，可能是加盐哈希或旧明文） */
 function getAuthPassword() {
   const data = load();
   return data.auth && data.auth.password ? String(data.auth.password) : '';
 }
 
-/** 写入访问口令 */
+const PWD_PREFIX = 'scrypt$';
+/** 写入访问口令：加盐 scrypt 哈希，空串表示未设置 */
 function setAuthPassword(pwd) {
   const data = load();
-  data.auth = { password: pwd };
+  if (!pwd) {
+    data.auth = { password: '' };
+  } else {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(String(pwd), salt, 32).toString('hex');
+    data.auth = { password: `${PWD_PREFIX}${salt}$${hash}` };
+  }
   save();
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, updateItem, isEditable, reorderCategory, getAliasEntries, getAliases, expandNames, snapshot, restore, getPath, setPath, load, setConfigDir, getConfigPath, getAuthPassword, setAuthPassword };
+function isLegacyPassword(stored) {
+  return !!stored && String(stored).indexOf(PWD_PREFIX) !== 0;
+}
+
+/** 校验口令，兼容旧明文存储（调用方登录成功后可透明升级为哈希） */
+function verifyPassword(plain, stored) {
+  if (!stored || plain == null) return false;
+  const s = String(stored);
+  if (isLegacyPassword(s)) {
+    const a = Buffer.from(String(plain));
+    const b = Buffer.from(s);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+  const parts = s.split('$');
+  if (parts.length !== 3) return false;
+  try {
+    const actual = crypto.scryptSync(String(plain), parts[1], 32);
+    const expected = Buffer.from(parts[2], 'hex');
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  } catch (e) { return false; }
+}
+
+module.exports = { getAll, getCategory, addItem, deleteItem, updateItem, isEditable, reorderCategory, getAliasEntries, getAliases, expandNames, snapshot, restore, getPath, setPath, load, setConfigDir, getConfigPath, getAuthPassword, setAuthPassword, verifyPassword, isLegacyPassword };

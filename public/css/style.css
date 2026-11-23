@@ -1,16 +1,20 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#f0f2f5;color:#333;min-height:100vh}
 
+/* 安全提醒：移入页脚，弱化为低调说明文字 */
+.security-notice{position:sticky;margin-top:12px;padding:6px 12px;background:#fafafa;border:1px solid #eee;border-radius:4px;color:#999;font-size:12px;font-weight:400;line-height:1.6;text-align:center}
+
 /* Top Nav */
-.top-nav{display:flex;align-items:center;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);padding:0 24px;height:56px;box-shadow:0 2px 8px rgba(0,0,0,.15);position:sticky;top:0;z-index:100}
-.top-nav .brand{color:#fff;font-size:18px;font-weight:700;margin-right:40px;display:flex;align-items:center;gap:8px}
-.top-nav .brand span{font-size:13px;font-weight:400;color:rgba(255,255,255,.6)}
-.top-nav .nav-items{display:flex;gap:4px;height:100%}
-.top-nav .nav-item{padding:0 16px;display:flex;align-items:center;color:rgba(255,255,255,.7);cursor:pointer;font-size:14px;transition:all .3s;border-bottom:3px solid transparent;position:relative;gap:6px}
-.top-nav .nav-item:hover{color:#fff;background:rgba(255,255,255,.08)}
-.top-nav .nav-item.active{color:#fff;border-bottom-color:#e94560;background:rgba(255,255,255,.1)}
-.top-nav .nav-logout{margin-left:auto;color:rgba(255,255,255,.6)}
-.top-nav .nav-logout:hover{color:#fff;background:rgba(233,69,96,.25)}
+.top-nav{display:flex;align-items:center;background:linear-gradient(100deg,#141a33 0%,#1b2a4a 45%,#123a5e 100%);padding:0 24px;height:60px;box-shadow:0 4px 18px rgba(10,20,45,.28);position:sticky;top:0;z-index:100}
+.top-nav .brand{color:#fff;font-size:17px;font-weight:700;margin-right:26px;display:flex;align-items:center;gap:10px;height:100%;padding-right:24px;border-right:1px solid rgba(255,255,255,.14);white-space:nowrap}
+.top-nav .brand span{font-size:11px;font-weight:500;color:rgba(255,255,255,.5);letter-spacing:1px}
+.top-nav .nav-items{display:flex;gap:2px;height:100%;align-items:stretch}
+.top-nav .nav-item{padding:0 15px;display:flex;align-items:center;color:rgba(255,255,255,.7);cursor:pointer;font-size:14px;transition:color .2s,background .2s;border-bottom:3px solid transparent;position:relative;gap:6px;white-space:nowrap;user-select:none}
+.top-nav .nav-item:hover{color:#fff;background:rgba(255,255,255,.07)}
+.top-nav .nav-item.active{color:#fff;font-weight:600;border-bottom-color:#e94560;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.10))}
+.top-nav .nav-tools{display:flex;align-items:center;gap:12px;margin-left:auto;height:100%}
+.top-nav .nav-logout{padding:0 14px;height:32px;display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.75);cursor:pointer;font-size:13px;white-space:nowrap;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:rgba(255,255,255,.06);transition:all .2s;user-select:none}
+.top-nav .nav-logout:hover{color:#fff;background:rgba(233,69,96,.28);border-color:rgba(233,69,96,.5)}
 
 /* 页面主题色：
    需求单管理-蓝 / CCB排期管理-绿 / 流转文件-橙 / 参数配置-紫 */
@@ -227,10 +231,20 @@ textarea.form-control{min-height:80px;resize:vertical}
 .folder-picker-item:active{background:#e6f7ff}
 
 /* Top nav search */
-.nav-search{position:relative;margin-left:auto;display:flex;align-items:center;padding:0 8px}
-.nav-search input{padding:6px 12px;border:none;border-radius:20px;font-size:13px;width:260px;background:rgba(255,255,255,.15);color:#fff;transition:all .3s;outline:none}
-.nav-search input::placeholder{color:rgba(255,255,255,.5)}
-.nav-search input:focus{background:rgba(255,255,255,.25);width:320px;box-shadow:0 0 0 2px rgba(255,255,255,.1)}
+.nav-search{position:relative;display:flex;align-items:center;padding:0}
+.nav-search input{padding:7px 14px;border:1px solid rgba(255,255,255,.16);border-radius:18px;font-size:13px;width:240px;background:rgba(255,255,255,.10);color:#fff;transition:all .25s;outline:none}
+.nav-search input::placeholder{color:rgba(255,255,255,.45)}
+.nav-search input:focus{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.35);width:290px;box-shadow:0 0 0 3px rgba(255,255,255,.08)}
+
+/* 窄屏下压缩导航，避免换行溢出 */
+@media(max-width:1100px){
+  .top-nav{padding:0 14px}
+  .top-nav .brand span{display:none}
+  .top-nav .brand{margin-right:14px;padding-right:14px}
+  .top-nav .nav-item{padding:0 10px;font-size:13px}
+  .nav-search input{width:180px}
+  .nav-search input:focus{width:220px}
+}
 .nav-search input:focus + .search-dropdown,
 .search-dropdown.show{display:block}
 .search-dropdown{display:none;position:absolute;top:calc(100% + 4px);right:0;width:480px;max-height:70vh;overflow-y:auto;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:2000}
@@ -642,3 +656,10 @@ a.file-link:hover, a.order-link:hover {
 .query-row .btn-icon{opacity:1}
 .query-row .badge{font-size:11px}
 .query-row .file-link{font-size:12px}
+/* 手工匹配成功后短暂高亮该文档节点 */
+.spec-just-updated{background:#f6ffed!important;box-shadow:inset 0 0 0 1px #b7eb8f}
+/* 业务参数拖拽排序 */
+.config-item[draggable=true]{cursor:grab}
+.config-item.drag-over{box-shadow:inset 0 2px 0 #1890ff;background:#e6f7ff}
+.config-item.dragging{opacity:.45}
+.config-drag-handle{color:#bbb;font-size:14px;user-select:none;margin-right:8px}

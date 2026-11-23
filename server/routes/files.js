@@ -39,12 +39,17 @@ module.exports = function (app) {
       const conds = ["f.deleted_at IS NULL"];
       const params = [];
       if (keyword) { const k = `%${keyword}%`; conds.push('(ro.order_number LIKE ? OR ro.name LIKE ? OR f.original_name LIKE ?)'); params.push(k, k, k); }
-      if (department) { conds.push('ro.department=?'); params.push(department); }
+      if (department) {
+        const names = config.expandNames('department', department);
+        conds.push(`ro.department IN (${names.map(() => '?').join(',')})`);
+        params.push(...names);
+      }
       if (date_from) { conds.push('f.uploaded_at >= ?'); params.push(date_from); }
       if (date_to) { conds.push('f.uploaded_at <= ?'); params.push(date_to); }
       if (project_name) {
-        conds.push('EXISTS (SELECT 1 FROM ccb_schedules cs WHERE cs.order_id=ro.id AND cs.is_project=1 AND cs.project_name=?)');
-        params.push(project_name);
+        const names = config.expandNames('project', project_name);
+        conds.push(`EXISTS (SELECT 1 FROM ccb_schedules cs WHERE cs.order_id=ro.id AND cs.is_project=1 AND cs.project_name IN (${names.map(() => '?').join(',')}))`);
+        params.push(...names);
       }
       const whereBase = conds.join(' AND ');
 

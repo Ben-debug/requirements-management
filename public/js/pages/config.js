@@ -23,6 +23,10 @@ async function loadDropdowns() {
 }
 
 // ---- 加载配置 ----
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+const CONFIG_LABELS = { department: '业务部门', version: '上线版本', system: '涉及改造系统', file_type: '流转文件类型', project: '项目', system_alias: '系统别名（格式：标准系统名=别名1,别名2）' };
+let editingConfigLabel = null;
+
 async function loadConfig() {
   try {
     const d = await api('/api/config');
@@ -31,18 +35,23 @@ async function loadConfig() {
     if (configPathEl && d.config_path) {
       configPathEl.innerHTML = `📄 配置文件路径：<code style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:12px;word-break:break-all">${esc(d.config_path)}</code>`;
     }
-    ['department', 'version', 'system', 'file_type', 'project'].forEach(cat => {
+    const hints = { system_alias: '<p style="font-size:13px;color:#999;margin-bottom:12px">格式：<code>标准系统名=别名1,别名2</code>，例如 <code>清算系统=清算,清算平台</code>；文件名含别名即自动匹配到标准系统。支持「修改」，仅影响后续扫描。</p>' };
+    ['department', 'version', 'system', 'file_type', 'project', 'system_alias'].forEach(cat => {
       const body = document.getElementById(`config-body-${cat}`);
       const count = document.getElementById(`config-${cat}-count`);
       const items = data[cat] || [];
+      const hint = hints[cat] || '';
       if (count) count.textContent = `${items.length}项`;
       if (!body) return;
       if (!items.length) {
-        body.innerHTML = '<div class="config-item"><span style="color:#999">暂无配置</span></div><div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="showAddConfig(\'' + cat + '\')">＋ 添加</button></div>';
+        body.innerHTML = hint + '<div class="config-item"><span style="color:#999">暂无配置</span></div><div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="showAddConfig(\'' + cat + '\')">＋ 添加</button></div>';
         return;
       }
-      body.innerHTML = items.map(item =>
-        `<div class="config-item"><span>${esc(item)}</span><button class="btn btn-sm btn-danger" onclick="deleteConfigItem('${cat}','${esc(item)}')">删除</button></div>`
+      const editable = ['system_alias', 'department', 'project', 'version'].indexOf(cat) !== -1;
+      body.innerHTML = hint + items.map(item =>
+        `<div class="config-item" draggable="true" data-cat="${escAttr(cat)}" data-label="${escAttr(item)}" ondragstart="configDragStart(event)" ondragover="configDragOver(event)" ondrop="configDrop(event)" ondragend="configDragEnd(event)">`
+        + `<span><span class="config-drag-handle" title="按住拖拽调整顺序">⠿</span>${esc(item)}</span>`
+        + `<span style="display:flex;gap:4px">${editable ? '<button class="btn btn-sm" onclick="editConfigItemFromEvent(event)">修改</button>' : ''}<button class="btn btn-sm btn-danger" onclick="deleteConfigItemFromEvent(event)">删除</button></span></div>`
       ).join('') + `<div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="showAddConfig('${cat}')">＋ 添加</button></div>`;
     });
   } catch (e) { console.error(e); }
@@ -51,13 +60,55 @@ async function loadConfig() {
 }
 
 function showAddConfig(cat) {
-  const labels = { department: '业务部门', version: '上线版本', system: '涉及改造系统', file_type: '流转文件类型', project: '项目' };
-  document.getElementById('config-modal-title').textContent = `添加${labels[cat]}`;
-  document.getElementById('config-label-text').textContent = `${labels[cat]}名称 *`;
+  editingConfigLabel = null;
+  document.getElementById('config-modal-title').textContent = `添加${CONFIG_LABELS[cat] || '配置项'}`;
+  document.getElementById('config-label-text').textContent = `${CONFIG_LABELS[cat] || '配置项'}名称 *`;
   document.getElementById('config-category-input').value = cat;
   document.getElementById('config-item-input').value = '';
+  document.getElementById('config-rename-options').style.display = 'none';
   openModal('config-modal');
   document.getElementById('config-item-input').focus();
+}
+
+// 系统别名只影响后续扫描；部门/项目/版本可选择是否同步更新历史数据
+function showEditConfig(cat, label) {
+  editingConfigLabel = label;
+  document.getElementById('config-modal-title').textContent = `修改${CONFIG_LABELS[cat] || '配置项'}`;
+  document.getElementById('config-label-text').textContent = `${CONFIG_LABELS[cat] || '配置项'} *`;
+  document.getElementById('config-category-input').value = cat;
+  document.getElementById('config-item-input').value = label;
+  const hasAlias = ['department', 'project', 'version'].indexOf(cat) !== -1;
+  document.getElementById('config-rename-options').style.display = hasAlias ? 'block' : 'none';
+  if (hasAlias) {
+    const first = document.querySelector('input[name="rename-update-history"][value="0"]');
+    if (first) first.checked = true;
+    loadRenameImpact(cat, label);
+  }
+  openModal('config-modal');
+  document.getElementById('config-item-input').focus();
+}
+
+// 预览部门/项目改名将影响的历史记录条数
+async function loadRenameImpact(cat, label) {
+  const el = document.getElementById('config-rename-impact');
+  if (!el) return;
+  if (!label) { el.textContent = ''; return; }
+  el.textContent = '正在统计影响范围...';
+  try {
+    const d = await api(`/api/config/${encodeURIComponent(cat)}/rename-impact?label=` + encodeURIComponent(label));
+    const x = d.data || {};
+    const detail = cat === 'project'
+      ? `排期记录 ${x.schedules} 条`
+      : cat === 'version'
+        ? `需求点 ${x.points} 条、排期 ${x.schedules} 条、需规文档 ${x.specDocs} 条`
+        : `需求单 ${x.orders} 条、关联部门 ${x.relatedOrders} 条、需规文档 ${x.specDocs} 条`;
+    el.innerHTML = `将影响：${detail}（共 ${x.total} 条）。`;
+  } catch (e) { el.textContent = '无法统计影响范围：' + (e.message || '未知错误'); }
+}
+
+function editConfigItemFromEvent(e) {
+  const item = e.target.closest('.config-item');
+  if (item && item.dataset.cat) showEditConfig(item.dataset.cat, item.dataset.label);
 }
 
 async function addConfigItem() {
@@ -65,8 +116,18 @@ async function addConfigItem() {
   const lbl = document.getElementById('config-item-input').value.trim();
   if (!lbl) { showToast('请输入名称', 'error'); return; }
   try {
-    await api('/api/config', { method: 'POST', body: JSON.stringify({ category: cat, label: lbl }) });
-    showToast('添加成功', 'success');
+    if (editingConfigLabel !== null) {
+      const updateHistory = ['department', 'project', 'version'].indexOf(cat) !== -1 &&
+        !!document.querySelector('input[name="rename-update-history"][value="1"]:checked');
+      const r = await api(`/api/config/${encodeURIComponent(cat)}/${encodeURIComponent(editingConfigLabel)}`, {
+        method: 'PUT', body: JSON.stringify({ label: lbl, update_history: updateHistory })
+      });
+      showToast(r.message || '已修改', 'success');
+    } else {
+      await api('/api/config', { method: 'POST', body: JSON.stringify({ category: cat, label: lbl }) });
+      showToast('添加成功', 'success');
+    }
+    editingConfigLabel = null;
     closeModal('config-modal');
     loadConfig();
   } catch (e) {}
@@ -79,6 +140,61 @@ async function deleteConfigItem(cat, label) {
     showToast('已删除', 'success');
     loadConfig();
   } catch (e) {}
+}
+
+function deleteConfigItemFromEvent(e) {
+  const item = e.target.closest('.config-item');
+  if (item && item.dataset.cat) deleteConfigItem(item.dataset.cat, item.dataset.label);
+}
+
+// ---- 业务参数拖拽排序 ----
+let configDragLabel = null;
+let configDragCat = null;
+
+function configDragStart(e) {
+  const item = e.target.closest('.config-item');
+  if (!item || !item.dataset.cat) return;
+  configDragCat = item.dataset.cat;
+  configDragLabel = item.dataset.label;
+  item.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', configDragLabel);
+}
+
+function configDragOver(e) {
+  const item = e.target.closest('.config-item');
+  if (!item || item.dataset.cat !== configDragCat || item.dataset.label === configDragLabel) return;
+  e.preventDefault();
+  item.classList.add('drag-over');
+}
+
+function configDragEnd(e) {
+  document.querySelectorAll('.config-item').forEach(el => el.classList.remove('dragging', 'drag-over'));
+  configDragLabel = null;
+  configDragCat = null;
+}
+
+async function configDrop(e) {
+  const item = e.target.closest('.config-item');
+  if (!item) return;
+  e.preventDefault();
+  item.classList.remove('drag-over');
+  const cat = item.dataset.cat;
+  const target = item.dataset.label;
+  if (cat !== configDragCat || !configDragLabel || target === configDragLabel) return;
+  const body = document.getElementById('config-body-' + cat);
+  if (!body) return;
+  const labels = Array.from(body.querySelectorAll('.config-item')).map(el => el.dataset.label);
+  const from = labels.indexOf(configDragLabel);
+  const to = labels.indexOf(target);
+  if (from < 0 || to < 0) return;
+  labels.splice(from, 1);
+  labels.splice(to, 0, configDragLabel);
+  try {
+    await api('/api/config/' + encodeURIComponent(cat) + '/order', { method: 'PUT', body: JSON.stringify({ labels }) });
+    showToast('顺序已保存', 'success');
+    loadConfig();
+  } catch (err) { showToast(err.message || '排序失败', 'error'); loadConfig(); }
 }
 
 // ---- 关联部门复选框 ----

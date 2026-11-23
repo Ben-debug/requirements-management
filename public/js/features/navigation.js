@@ -7,7 +7,7 @@
 function navigate(page) {
   state.currentPage = page;
   document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
-  document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
   document.querySelector('.top-nav').dataset.page = page;
   document.querySelectorAll('.page-content').forEach(e => e.style.display = 'none');
   document.getElementById(`page-${page}`).style.display = 'block';

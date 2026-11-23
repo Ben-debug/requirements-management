@@ -6,7 +6,7 @@ const { getDatabase } = require('../database');
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
-const { walkDir } = require('../utils');
+const { walkDir, paginate } = require('../utils');
 
 module.exports = function (app) {
 
@@ -18,27 +18,49 @@ module.exports = function (app) {
     return custom || path.join(DATA_DIR, 'public', 'uploads', 'meeting_files');
   }
 
-  // ---- 会议列表 ----
+  // ---- 会议列表（支持筛选 + 分页；不传分页参数时仍返回全量，兼容各页面下拉）----
   app.get('/api/meetings', (req, res) => {
     try {
       const db = getDatabase();
-      // 一次聚合查询取得每场会议的排期概要，避免逐会议查询
-      const summaryRows = db.prepare(`SELECT cs.meeting_id,
-          COUNT(*) AS points,
-          COUNT(DISTINCT cs.order_id) AS orders,
-          COUNT(DISTINCT ro.department) AS departments,
-          COUNT(DISTINCT cs.system) AS systems,
-          COUNT(DISTINCT cs.version) AS versions,
-          SUM(COALESCE(cs.is_project, 0)) AS projects
-        FROM ccb_schedules cs
-        JOIN requirement_orders ro ON ro.id = cs.order_id
-        GROUP BY cs.meeting_id`).all();
-      const summaryMap = {};
-      summaryRows.forEach(r => { summaryMap[r.meeting_id] = r; });
+      const { keyword, ccb_only, date_from, date_to, page, pageSize } = req.query;
+      const where = [], params = [];
+      if (keyword) {
+        where.push('(meeting_name LIKE ? OR notes LIKE ?)');
+        const k = `%${keyword}%`; params.push(k, k);
+      }
+      if (ccb_only === '1' || ccb_only === 'true') where.push("UPPER(meeting_name) LIKE '%CCB%'");
+      if (date_from) { where.push('meeting_date >= ?'); params.push(date_from); }
+      if (date_to) { where.push('meeting_date <= ?'); params.push(date_to); }
+      const baseSql = 'SELECT * FROM ccb_meetings'
+        + (where.length ? ' WHERE ' + where.join(' AND ') : '')
+        + ' ORDER BY meeting_date DESC, id DESC';
       const zero = { points: 0, orders: 0, departments: 0, systems: 0, versions: 0, projects: 0 };
-      const meetings = db.prepare('SELECT * FROM ccb_meetings ORDER BY meeting_date DESC').all()
-        .map(m => ({ ...m, schedule_summary: summaryMap[m.id] || zero }));
-      res.json({ success: true, data: meetings });
+      // 一次聚合查询取得当前页会议的排期概要，避免逐会议查询
+      const withSummary = rows => {
+        if (!rows.length) return rows;
+        const ph = rows.map(() => '?').join(',');
+        const summaryRows = db.prepare(`SELECT cs.meeting_id,
+            COUNT(*) AS points,
+            COUNT(DISTINCT cs.order_id) AS orders,
+            COUNT(DISTINCT ro.department) AS departments,
+            COUNT(DISTINCT cs.system) AS systems,
+            COUNT(DISTINCT cs.version) AS versions,
+            SUM(COALESCE(cs.is_project, 0)) AS projects
+          FROM ccb_schedules cs
+          JOIN requirement_orders ro ON ro.id = cs.order_id
+          WHERE cs.meeting_id IN (${ph})
+          GROUP BY cs.meeting_id`).all(...rows.map(r => r.id));
+        const summaryMap = {};
+        summaryRows.forEach(r => { summaryMap[r.meeting_id] = r; });
+        return rows.map(m => ({ ...m, schedule_summary: summaryMap[m.id] || zero }));
+      };
+
+      if (page === undefined && pageSize === undefined) {
+        return res.json({ success: true, data: withSummary(db.prepare(baseSql).all(...params)) });
+      }
+      const p = paginate(baseSql, params, parseInt(page) || 1, parseInt(pageSize) || 10);
+      res.json({ success: true, data: withSummary(p.items),
+        total: p.total, page: p.page, pageSize: p.pageSize, totalPages: p.totalPages });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 

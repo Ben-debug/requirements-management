@@ -3,11 +3,35 @@
  * 会议列表、创建、编辑、删除
  */
 
-async function loadMeetings() {
+let meetingPage = 1;
+
+async function loadMeetings(page) {
+  if (page !== undefined) meetingPage = page;
   try {
-    const meetings = (await api('/api/meetings')).data;
+    const params = new URLSearchParams({
+      page: meetingPage,
+      pageSize: parseInt(document.getElementById('meetings-page-size')?.value, 10) || 10
+    });
+    const keyword = document.getElementById('mtg-keyword')?.value.trim();
+    const from = document.getElementById('mtg-date-from')?.value;
+    const to = document.getElementById('mtg-date-to')?.value;
+    const ccbOnly = document.getElementById('mtg-ccb-only')?.checked;
+    if (keyword) params.set('keyword', keyword);
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    if (ccbOnly) params.set('ccb_only', '1');
+
+    const d = await api('/api/meetings?' + params.toString());
+    const meetings = d.data;
+    const info = document.getElementById('meeting-result-info');
+    if (info) info.textContent = d.total > 0 ? `共 ${d.total} 场会议` : '';
+    renderPagination('meetings-pagination', d, 'loadMeetings', 'meetings-page-size');
+
     const c = document.getElementById('meetings-list');
-    if (!meetings.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无CCB会议</p></div>'; return; }
+    if (!meetings.length) {
+      c.innerHTML = '<div class="empty-state"><div class="icon">📅</div><p>暂无符合条件的会议</p></div>';
+      return;
+    }
     c.innerHTML = meetings.map(m => {
       const open = m.file_name
         ? fileOpenInfo({ id: m.id, file_name: m.file_name }, `/api/meetings/${m.id}/file`)
@@ -31,6 +55,16 @@ async function loadMeetings() {
       </div>`;
     }).join('');
   } catch (e) {}
+}
+
+function resetMeetingFilter() {
+  ['mtg-keyword', 'mtg-date-from', 'mtg-date-to'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const ccb = document.getElementById('mtg-ccb-only');
+  if (ccb) ccb.checked = false;
+  loadMeetings(1);
 }
 
 // ---- 会议表单提交 ----

@@ -18,6 +18,61 @@ module.exports = function (app) {
     return path.join(DATA_DIR, 'public', 'uploads');
   }
 
+  // ---- 改名：历史数据精确替换（按逗号分隔的 token，避免子串误伤）----
+  function splitTokens(raw) {
+    return String(raw || '').split(/[,，、]+/).map(s => s.trim()).filter(Boolean);
+  }
+  function replaceToken(raw, oldName, newName) {
+    const parts = splitTokens(raw);
+    if (!parts.includes(oldName)) return { value: raw, changed: false };
+    return { value: parts.map(p => p === oldName ? newName : p).join(','), changed: true };
+  }
+  function collectRenameImpact(db, cat, label) {
+    if (cat === 'project') {
+      const schedules = db.prepare('SELECT COUNT(*) AS n FROM ccb_schedules WHERE project_name=?').get(label).n;
+      return { schedules, total: schedules };
+    }
+    if (cat === 'version') {
+      const points = db.prepare('SELECT COUNT(*) AS n FROM requirement_points WHERE version=?').get(label).n;
+      const schedules = db.prepare('SELECT COUNT(*) AS n FROM ccb_schedules WHERE version=?').get(label).n;
+      const specDocs = db.prepare('SELECT COUNT(*) AS n FROM spec_documents WHERE version=?').get(label).n;
+      return { points, schedules, specDocs, total: points + schedules + specDocs };
+    }
+    const orders = db.prepare('SELECT COUNT(*) AS n FROM requirement_orders WHERE department=?').get(label).n;
+    const rel = db.prepare('SELECT related_departments FROM requirement_orders WHERE related_departments LIKE ?').all(`%${label}%`)
+      .filter(r => splitTokens(r.related_departments).includes(label)).length;
+    const docs = db.prepare('SELECT matched_department FROM spec_documents WHERE matched_department LIKE ?').all(`%${label}%`)
+      .filter(r => splitTokens(r.matched_department).includes(label)).length;
+    return { orders, relatedOrders: rel, specDocs: docs, total: orders + rel + docs };
+  }
+  function applyRenameHistoryUpdate(db, cat, oldName, newName) {
+    if (cat === 'project') {
+      const schedules = db.prepare('UPDATE ccb_schedules SET project_name=? WHERE project_name=?').run(newName, oldName).changes;
+      return { schedules, total: schedules };
+    }
+    if (cat === 'version') {
+      const points = db.prepare('UPDATE requirement_points SET version=? WHERE version=?').run(newName, oldName).changes;
+      const schedules = db.prepare('UPDATE ccb_schedules SET version=? WHERE version=?').run(newName, oldName).changes;
+      const specDocs = db.prepare('UPDATE spec_documents SET version=? WHERE version=?').run(newName, oldName).changes;
+      return { points, schedules, specDocs, total: points + schedules + specDocs };
+    }
+    const orderRows = db.prepare('SELECT id, related_departments FROM requirement_orders WHERE related_departments LIKE ?').all(`%${oldName}%`);
+    const docRows = db.prepare('SELECT id, matched_department FROM spec_documents WHERE matched_department LIKE ?').all(`%${oldName}%`);
+    const updOrder = db.prepare("UPDATE requirement_orders SET related_departments=?, updated_at=datetime('now','localtime') WHERE id=?");
+    const updSpec = db.prepare("UPDATE spec_documents SET matched_department=?, updated_at=datetime('now','localtime') WHERE id=?");
+    let relatedOrders = 0, specDocs = 0;
+    for (const r of orderRows) {
+      const res = replaceToken(r.related_departments, oldName, newName);
+      if (res.changed) { updOrder.run(res.value, r.id); relatedOrders++; }
+    }
+    for (const r of docRows) {
+      const res = replaceToken(r.matched_department, oldName, newName);
+      if (res.changed) { updSpec.run(res.value, r.id); specDocs++; }
+    }
+    const orders = db.prepare("UPDATE requirement_orders SET department=?, updated_at=datetime('now','localtime') WHERE department=?").run(newName, oldName).changes;
+    return { orders, relatedOrders, specDocs, total: orders + relatedOrders + specDocs };
+  }
+
   const uploadTemp = createUploadMiddleware(getUploadBaseDir());
   const { getTemplateDir, TEMPLATE_FILENAME } = wordGenerator;
 
@@ -94,6 +149,22 @@ module.exports = function (app) {
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 
+  // 部门/项目改名影响预览（只读，不写任何数据）
+  app.get('/api/config/:category/rename-impact', (req, res) => {
+    try {
+      const { category } = req.params;
+      if (['department', 'project', 'version'].indexOf(category) === -1) {
+        return res.status(400).json({ success: false, message: '该分类不支持改名预览' });
+      }
+      const label = String(req.query.label || '').trim();
+      if (!label) return res.status(400).json({ success: false, message: '缺少名称' });
+      if (!config.getCategory(category).includes(label)) {
+        return res.status(400).json({ success: false, message: '该名称不在配置中' });
+      }
+      res.json({ success: true, data: collectRenameImpact(getDatabase(), category, label) });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
   app.post('/api/config', (req, res) => {
     try {
       const { category, label } = req.body;
@@ -108,6 +179,53 @@ module.exports = function (app) {
     try {
       if (req.params.category === 'auth') return res.status(400).json({ success: false, message: '访问口令请通过参数配置页修改' });
       config.deleteItem(req.params.category, req.params.label); res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
+  // 自定义排序：提交该项分类的完整、不重复顺序列表
+  app.put('/api/config/:category/order', (req, res) => {
+    try {
+      const cat = req.params.category;
+      if (cat === 'auth' || cat === 'paths') return res.status(400).json({ success: false, message: '该分类不支持排序' });
+      const labels = req.body && req.body.labels;
+      if (!config.reorderCategory(cat, labels)) {
+        return res.status(400).json({ success: false, message: '排序内容无效：需提交当前所有条目的完整且不重复的顺序' });
+      }
+      res.json({ success: true, message: '顺序已保存' });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
+  // 改名：系统别名只影响后续扫描；部门可选择是否同步更新历史引用，须放在 /order 路由之后
+  app.put('/api/config/:category/:label', (req, res) => {
+    try {
+      const { category, label } = req.params;
+      if (!config.isEditable(category)) {
+        return res.status(400).json({ success: false, message: '该分类不支持改名（为避免历史数据引用失配）' });
+      }
+      const next = String((req.body && req.body.label) || '').trim();
+      const current = config.getCategory(category);
+      if (!current.includes(label) || !next || (next !== label && current.includes(next))) {
+        return res.status(400).json({ success: false, message: '修改失败：名称不能为空或与已有项重复，且原条目必须存在' });
+      }
+      const hasAlias = ['department', 'project', 'version'].indexOf(category) !== -1;
+      const updateHistory = hasAlias && req.body && req.body.update_history === true;
+      const snapshot = config.snapshot();
+      let history = null;
+      try {
+        const db = getDatabase();
+        // 配置与数据库写入放在同一事务：数据库失败时回滚配置
+        db.transaction(() => {
+          if (!config.updateItem(category, label, next)) throw new Error('配置修改失败');
+          if (updateHistory) history = applyRenameHistoryUpdate(db, category, label, next);
+        })();
+      } catch (err) {
+        config.restore(snapshot);
+        return res.status(500).json({ success: false, message: '改名失败，已回滚：' + err.message });
+      }
+      const message = updateHistory
+        ? `已改名并同步更新 ${history.total} 条历史记录`
+        : (hasAlias ? '已改名，历史数据保留原名（旧名已作为匹配别名）' : '已修改（仅影响后续目录扫描）');
+      res.json({ success: true, message, data: { history } });
     } catch (err) { res.status(500).json({ success: false, message: err.message }); }
   });
 

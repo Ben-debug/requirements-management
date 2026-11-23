@@ -18,11 +18,13 @@
     <div class="nav-item" data-page="files" onclick="navigate('files')">📎 流转文件</div>
     <div class="nav-item" data-page="specs" onclick="navigate('specs')">📋 需规归档</div>
     <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
-    <div class="nav-item nav-logout" onclick="logout()" title="退出登录">🚪 退出</div>
   </div>
-  <div class="nav-search" id="nav-search-container">
-    <input type="text" id="global-search" placeholder="🔍 全局搜索编号/名称/提出人/需求点..." autocomplete="off">
-    <div id="global-search-results" class="search-dropdown"></div>
+  <div class="nav-tools">
+    <div class="nav-search" id="nav-search-container">
+      <input type="text" id="global-search" placeholder="🔍 全局搜索编号/名称/提出人/需求点..." autocomplete="off">
+      <div id="global-search-results" class="search-dropdown"></div>
+    </div>
+    <div class="nav-logout" onclick="logout()" title="退出登录">🚪 退出</div>
   </div>
 </nav>
 
@@ -124,8 +126,19 @@
   </div>
   <!-- Tab: 会议管理 -->
   <div id="tab-meeting-mgmt" class="tab-content" style="display:block">
-    <div class="toolbar"><button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个排期会议，填写会议名称和日期，后续进行需求点排期">＋ 新建排期会议</button></div>
+    <div class="toolbar" style="flex-wrap:wrap;gap:8px;display:flex;align-items:center">
+      <button class="btn btn-primary" onclick="showCreateMeeting()" title="创建一个排期会议，填写会议名称和日期，后续进行需求点排期">＋ 新建排期会议</button>
+      <input type="text" id="mtg-keyword" placeholder="🔍 会议名称/备注" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:150px" onkeydown="if(event.key==='Enter')loadMeetings(1)">
+      <input type="date" id="mtg-date-from" title="开始日期" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
+      <span style="color:#999">~</span>
+      <input type="date" id="mtg-date-to" title="结束日期" style="padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px">
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" id="mtg-ccb-only"> 仅显示CCB会议</label>
+      <button class="btn btn-sm" onclick="loadMeetings(1)">🔍 查询</button>
+      <button class="btn btn-sm" onclick="resetMeetingFilter()">↻ 重置</button>
+      <span id="meeting-result-info" style="font-size:13px;color:#999;margin-left:8px"></span>
+    </div>
     <div id="meetings-list"></div>
+    <div id="meetings-pagination" class="pagination"></div>
   </div>
   <!-- Tab: 排期查询 -->
   <div id="tab-schedule-query" class="tab-content" style="display:none">
@@ -222,7 +235,7 @@
       <code>需规目录/<b>{版本名}</b>/</code>
       <span class="spec-folder-example">例如：需规目录/2026年端午版本/需求规格.docx</span>
       <br>
-      <span style="font-size:12px">💡 文件直接放入版本文件夹即可，扫描只归三类：含「评审/纪要」（或旧 meetings 目录）→ 评审会议纪要，PDF → 签字扫描件，其余 Word/Office 文件 → word版本；每个文件只保留一条归档记录，重复扫描按当前规则覆盖旧记录。</span>
+      <span style="font-size:12px">💡 文件直接放入版本文件夹即可，扫描规则：含「评审/纪要」（或旧 meetings 目录）→ 评审会议纪要，PDF → 签字扫描件，其余 Word/Office 文件 → word版本；每个文件只保留一条归档记录，重复扫描按当前规则覆盖旧记录。<br>🚫 除纪要外，文件名必须包含配置中的<b>系统名或系统别名</b>，否则跳过不归档（不产生 "-" 之类的非真实系统）；文件名含<b>部门名</b>时，该系统下只关联该部门提出的需求单。</span>
     </div>
 
     <div class="toolbar" style="margin-bottom:16px">
@@ -291,6 +304,7 @@
     <div class="tab-item" data-tab="config-system" onclick="switchConfigTab('config-system')">🔧 系统配置</div>
   </div>
   <div id="tab-config-business" class="tab-content" style="display:block">
+    <p style="font-size:13px;color:#999;margin:0 0 12px;padding:8px 12px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px">💡 每项可<b>按住 ⠿ 拖拽调整顺序</b>，顺序即时保存，影响下拉选项展示和归档树的版本排序。<b>部门/项目/上线版本</b>可点「修改」改名，并自行选择是否同步更新历史数据（旧名自动保留为匹配别名，版本旧目录仍可扫描）；<b>系统/文件类型不支持改名</b>，需替换请删除旧项后新增并自行核对历史数据；<b>系统别名</b>只影响后续目录扫描，可点「修改」直接编辑。</p>
     <div class="config-accordion">
     <div class="config-group">
       <div class="config-group-header" onclick="toggleConfigGroup(this)">
@@ -326,6 +340,15 @@
         <div><span id="config-project-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
       </div>
       <div class="config-group-body" id="config-body-project"></div>
+    </div>
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">🔤 系统别名</span>
+        <div><span id="config-system_alias-count" style="font-size:12px;color:#999;margin-right:12px"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-system_alias">
+        <p style="font-size:13px;color:#999;margin-bottom:12px">格式：<code>标准系统名=别名1,别名2</code>，例如 <code>清算系统=清算,清算平台</code>。扫描需规目录时，文件名含别名即自动匹配到该标准系统（不影响手动匹配与查询下拉）。支持「修改」，仅影响后续扫描。</p>
+      </div>
     </div>
     <div class="config-group">
       <div class="config-group-header" onclick="toggleConfigGroup(this)">
@@ -604,7 +627,17 @@
 <!-- Config Add Modal -->
 <div id="config-modal" class="modal-overlay"><div class="modal" style="max-width:450px">
   <div class="modal-header"><h3 id="config-modal-title">添加配置项</h3><button class="modal-close" onclick="closeModal('config-modal')">×</button></div>
-  <div class="modal-body"><div class="form-group"><label id="config-label-text">名称 <span class="required">*</span></label><input type="text" id="config-item-input" class="form-control"></div><input type="hidden" id="config-category-input"></div>
+  <div class="modal-body">
+    <div class="form-group"><label id="config-label-text">名称 <span class="required">*</span></label><input type="text" id="config-item-input" class="form-control"></div>
+    <input type="hidden" id="config-category-input">
+    <div id="config-rename-options" style="display:none;margin-top:12px;padding:12px;background:#f6f9ff;border:1px solid #d6e4ff;border-radius:6px">
+      <div style="font-size:13px;font-weight:600;color:#333;margin-bottom:8px">历史数据处理方式</div>
+      <label style="display:block;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="radio" name="rename-update-history" value="0" checked> 仅修改配置，历史数据保留原名</label>
+      <label style="display:block;font-size:13px;cursor:pointer"><input type="radio" name="rename-update-history" value="1"> 同步更新历史数据</label>
+      <div id="config-rename-impact" style="margin-top:8px;font-size:12px;color:#666;line-height:1.6"></div>
+      <div style="margin-top:8px;font-size:12px;color:#fa8c16">⚠️ 旧名会自动保留为匹配别名；同步更新前建议先备份 data 目录。</div>
+    </div>
+  </div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('config-modal')">取消</button><button type="button" class="btn btn-primary" onclick="addConfigItem()">保存</button></div>
 </div></div>
 
@@ -644,8 +677,12 @@
       <div id="spec-match-version-display" style="padding:8px 12px;background:#fafafa;border-radius:6px;font-size:14px"></div>
     </div>
     <div class="form-group">
+      <label>部门限定</label>
+      <div id="spec-match-department" style="padding:8px 12px;background:#fff7e6;border-radius:6px;font-size:13px;color:#ad6800"></div>
+    </div>
+    <div class="form-group">
       <label>匹配系统（可多选）</label>
-      <div style="font-size:12px;color:#999;margin-bottom:4px">系统匹配后，关联需求点由排期信息自动推导</div>
+      <div style="font-size:12px;color:#999;margin-bottom:4px">系统匹配后，关联需求点由排期信息自动推导；文档名含部门时仅关联该部门提出的需求单</div>
       <div id="spec-match-systems" style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #d9d9d9;border-radius:6px;min-height:40px"></div>
     </div>
     <div id="spec-match-preview" style="display:none;margin-top:12px;padding:10px 14px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px;font-size:13px"></div>
@@ -678,24 +715,25 @@
 
 <footer class="app-footer">
   <div class="footer-content">
-    <span>我的工作平台 v2.3.3</span>
+    <span>我的工作平台 v2.3.4</span>
     <span>创作者：Yu by AI</span>
-    <span>发布日期：2026-11-17</span>
+    <span>发布日期：2026-11-20</span>
   </div>
   <div class="footer-note">🔒 本地部署 · 数据仅存本机 · 不联网</div>
+  <div class="security-notice">严禁处理涉密信息</div>
 </footer>
-<script src="/js/api.js?v=2.3.3"></script>
-<script src="/js/components.js?v=2.3.3"></script>
-<script src="/js/features/renderers.js?v=2.3.3"></script>
-<script src="/js/features/navigation.js?v=2.3.3"></script>
-<script src="/js/pages/config.js?v=2.3.3"></script>
-<script src="/js/pages/orders.js?v=2.3.3"></script>
-<script src="/js/pages/meetings.js?v=2.3.3"></script>
-<script src="/js/pages/schedules.js?v=2.3.3"></script>
-<script src="/js/pages/files.js?v=2.3.3"></script>
-<script src="/js/pages/specs.js?v=2.3.3"></script>
-<script src="/js/features/search.js?v=2.3.3"></script>
-<script src="/js/features/import-export.js?v=2.3.3"></script>
-<script src="/js/app.js?v=2.3.3"></script>
+<script src="/js/api.js?v=2.3.4"></script>
+<script src="/js/components.js?v=2.3.4"></script>
+<script src="/js/features/renderers.js?v=2.3.4"></script>
+<script src="/js/features/navigation.js?v=2.3.4"></script>
+<script src="/js/pages/config.js?v=2.3.4"></script>
+<script src="/js/pages/orders.js?v=2.3.4"></script>
+<script src="/js/pages/meetings.js?v=2.3.4"></script>
+<script src="/js/pages/schedules.js?v=2.3.4"></script>
+<script src="/js/pages/files.js?v=2.3.4"></script>
+<script src="/js/pages/specs.js?v=2.3.4"></script>
+<script src="/js/features/search.js?v=2.3.4"></script>
+<script src="/js/features/import-export.js?v=2.3.4"></script>
+<script src="/js/app.js?v=2.3.4"></script>
 </body>
 </html>

@@ -50,6 +50,7 @@ function initDatabase(db) {
       archive_category TEXT DEFAULT 'word_version',
       meeting_date TEXT,
       matched_systems TEXT DEFAULT '',
+      matched_department TEXT DEFAULT '',
       auto_matched INTEGER DEFAULT 0,
       notes TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime')),
@@ -75,6 +76,7 @@ function initDatabase(db) {
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN doc_type TEXT DEFAULT 'spec_doc'"); } catch (e) {}
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN meeting_date TEXT"); } catch (e) {}
   try { db.exec("ALTER TABLE spec_documents ADD COLUMN archive_category TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE spec_documents ADD COLUMN matched_department TEXT DEFAULT ''"); } catch (e) {}
   // 历史记录按既有规则回填归档类别：纪要→meeting_minutes，PDF→signed_scan，其余→word_version
   try {
     db.exec("UPDATE spec_documents SET archive_category='meeting_minutes' WHERE doc_type='meeting_minutes' AND (archive_category IS NULL OR archive_category='')");

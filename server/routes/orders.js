@@ -30,7 +30,11 @@ module.exports = function (app) {
       const { page = 1, pageSize = 10, department, keyword, date_from, date_to, is_project, is_scheduled, meeting_name, sort = 'created_at', order = 'desc', group_by } = req.query;
       let sql = 'SELECT id, order_number, name, department, related_departments, proposer, propose_date, business_launch_date, status, created_at, updated_at FROM requirement_orders WHERE 1=1';
       const params = [];
-      if (department) { sql += ' AND department=?'; params.push(department); }
+      if (department) {
+        const names = config.expandNames('department', department);
+        sql += ` AND department IN (${names.map(() => '?').join(',')})`;
+        params.push(...names);
+      }
       if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
       if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
       if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }

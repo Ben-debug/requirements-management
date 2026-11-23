@@ -352,7 +352,7 @@ test('F. 核心 API 回归', '需求单详情与创建内容一致', async () =>
 test('F. 核心 API 回归', 'GET /api/config 返回四类配置', async () => {
   const d = (await call('/api/config')).json();
   assert.equal(d.success, true);
-  for (const k of ['department', 'version', 'system', 'file_type']) {
+  for (const k of ['department', 'version', 'system', 'file_type', 'system_alias']) {
     assert.ok(Array.isArray(d.data[k]), k + ' 应为数组');
   }
 });
@@ -675,8 +675,8 @@ test('K. 需规扫描分类', '准备版本目录文件（纪要 / word / 签字
   fs.writeFileSync(path.join(verDir, '需求规格评审会.docx'), 'minutes');
   fs.writeFileSync(path.join(verDir, '清算系统需求规格.docx'), 'word');
   fs.writeFileSync(path.join(verDir, '清算系统需求规格.pdf'), 'pdf');
-  fs.writeFileSync(path.join(verDir, '季度报表.xlsx'), 'excel');
-  fs.writeFileSync(path.join(verDir, '方案汇报.pptx'), 'ppt');
+  fs.writeFileSync(path.join(verDir, '清算系统季度报表.xlsx'), 'excel');
+  fs.writeFileSync(path.join(verDir, '清算系统方案汇报.pptx'), 'ppt');
   const legacyDir = path.join(tmpRoot, 'spec', '旧版本', 'meetings');
   fs.mkdirSync(legacyDir, { recursive: true });
   fs.writeFileSync(path.join(legacyDir, '旧版评审纪要.pdf'), 'legacy minutes');
@@ -707,7 +707,7 @@ test('K. 需规扫描分类', '同文件已有记录时按新规则覆盖，仍�
   const v = '覆盖测试版本';
   const verDir = path.join(tmpRoot, 'spec', v);
   fs.mkdirSync(verDir, { recursive: true });
-  const filePath = path.join(verDir, '测试文档.docx');
+  const filePath = path.join(verDir, '清算系统测试文档.docx');
   fs.writeFileSync(filePath, 'draft');
   await call('/api/specs/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -719,7 +719,7 @@ test('K. 需规扫描分类', '同文件已有记录时按新规则覆盖，仍�
   // 模拟历史遗留：同一路径误存为「评审会议纪要」类别的旧记录
   db.prepare('DELETE FROM spec_documents WHERE id=?').run(rec.id);
   db.prepare("INSERT INTO spec_documents (version, file_name, file_path, doc_type, archive_category, notes) VALUES (?,?,?,'meeting_minutes','meeting_minutes',?)")
-    .run(v, '测试文档.docx', filePath, '测试文档');
+    .run(v, '清算系统测试文档.docx', filePath, '清算系统测试文档');
 
   await call('/api/specs/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -731,7 +731,7 @@ test('K. 需规扫描分类', '同文件已有记录时按新规则覆盖，仍�
   const recs = db.prepare('SELECT id, file_name, archive_category FROM spec_documents WHERE version=?').all(v);
   assert.equal(recs.length, 1, '仅保留一条归档记录');
   assert.equal(recs[0].archive_category, 'word_version');
-  assert.equal(recs[0].file_name, '测试文档.docx');
+  assert.equal(recs[0].file_name, '清算系统测试文档.docx');
 });
 test('K. 需规扫描分类', '手动匹配在重新扫描后按新规则覆盖', async () => {
   const v = '手动覆盖测试版本';
@@ -746,7 +746,7 @@ test('K. 需规扫描分类', '手动匹配在重新扫描后按新规则覆盖'
   assert.equal(rec.auto_matched, 1, '首次扫描自动匹配到清算系统');
   const mr = await call('/api/specs/' + rec.id + '/match', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ systems: [] })
+    body: JSON.stringify({ systems: ['业务服务平台'] })
   });
   assert.equal(mr.json().success, true);
   rec = db.prepare('SELECT id, auto_matched FROM spec_documents WHERE version=?').get(v);
@@ -780,7 +780,7 @@ test('K. 需规扫描分类', '扫描清理磁盘文件已不存在的失效记�
   fs.mkdirSync(verDir, { recursive: true });
   const staleFile = path.join(verDir, '清算系统即将删除.docx');
   fs.writeFileSync(staleFile, 'stale');
-  fs.writeFileSync(path.join(verDir, '保留文档.docx'), 'keep');
+  fs.writeFileSync(path.join(verDir, '清算系统保留文档.docx'), 'keep');
   await call('/api/specs/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ version: v })
@@ -803,14 +803,14 @@ test('K. 需规扫描分类', '扫描清理磁盘文件已不存在的失效记�
   assert.match(r.json().message, /失效记录/);
   const recs = db.prepare('SELECT file_name FROM spec_documents WHERE version=?').all(v);
   assert.equal(recs.length, 1, '仅保留仍在磁盘上的文档');
-  assert.equal(recs[0].file_name, '保留文档.docx');
+  assert.equal(recs[0].file_name, '清算系统保留文档.docx');
   assert.equal(db.prepare('SELECT COUNT(*) c FROM spec_document_points WHERE spec_id=?').get(staleRec.id).c, 0, '失效记录关联点应级联删除');
 });
 test('K. 需规扫描分类', '目录内文件全部删除后仍能清理失效记录', async () => {
   const v = '全量失效清理版本';
   const verDir = path.join(tmpRoot, 'spec', v);
   fs.mkdirSync(verDir, { recursive: true });
-  const onlyFile = path.join(verDir, '唯一文档.docx');
+  const onlyFile = path.join(verDir, '清算系统唯一文档.docx');
   fs.writeFileSync(onlyFile, 'only');
   await call('/api/specs/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1119,6 +1119,679 @@ test('O. 列表与概要修复', '会议列表带排期概要，卡片渲染概�
   assert.ok(src.includes('排期概要'));
   assert.ok(src.includes('暂无排期'));
   assert.ok(src.includes('fileOpenInfo(') && src.includes('open.downloadUrl'));
+});
+
+// ==================================================================
+// Q. 系统别名匹配
+// ==================================================================
+test('Q. 系统别名匹配', '文件名只含别名时仍自动匹配到标准系统并关联需求点', async () => {
+  const aliasLabel = '清算系统=清算,清算平台';
+  const add = await call('/api/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category: 'system_alias', label: aliasLabel })
+  });
+  assert.equal(add.json().success, true);
+  try {
+    const v = '别名匹配测试版本';
+    const verDir = path.join(tmpRoot, 'spec', v);
+    fs.mkdirSync(verDir, { recursive: true });
+    const aliasOnly = path.join(verDir, '清算平台对账功能.docx');
+    const standard = path.join(verDir, '清算系统需求规格.docx');
+    fs.writeFileSync(aliasOnly, 'alias');
+    fs.writeFileSync(standard, 'standard');
+
+    const o = db.prepare('INSERT INTO requirement_orders (order_number,name,department) VALUES (?,?,?)').run('ALIAS-01', '别名订单', '清算部');
+    const oid = Number(o.lastInsertRowid);
+    const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(oid, 'ALIAS-01001', '清算系统需求点');
+    const pid = Number(pt.lastInsertRowid);
+    db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)')
+      .run(meetingId, oid, pid, '清算系统', v, 0, null);
+
+    const scan = await call('/api/specs/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: v })
+    });
+    assert.equal(scan.json().success, true);
+    const rows = db.prepare('SELECT file_name, matched_systems, auto_matched, id FROM spec_documents WHERE version=?').all(v);
+    assert.equal(rows.length, 2);
+    rows.forEach(r => {
+      assert.equal(r.auto_matched, 1);
+      assert.equal(r.matched_systems, '清算系统', '别名命中后仍应存标准系统名');
+    });
+    const linked = db.prepare('SELECT spec_id, point_id FROM spec_document_points WHERE point_id=?').all(pid);
+    assert.equal(linked.length, 2, '两份文档都应关联到清算系统的需求点');
+  } finally {
+    await call('/api/config/system_alias/' + encodeURIComponent(aliasLabel), { method: 'DELETE' });
+  }
+});
+test('Q. 系统别名匹配', '未配置别名时行为与原来一致', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'server', 'routes', 'specs.js'), 'utf8');
+  assert.ok(src.includes('matchSystemsInFileName'));
+  assert.ok(src.includes('getSystemAliases'));
+  assert.ok(src.includes('fileName.includes(sys)'), '仍应保留标准名精确匹配');
+});
+
+// ==================================================================
+// R. 临时文件、树状层级与匹配不跳页
+// ==================================================================
+test('R. 归档树与临时文件', '系统临时文件不产生归档记录', async () => {
+  const v = '临时文件测试版本';
+  const verDir = path.join(tmpRoot, 'spec', v);
+  fs.mkdirSync(verDir, { recursive: true });
+  ['~$临时文档.docx', '.DS_Store', 'Thumbs.db', 'desktop.ini', '缓存.tmp', '备份.bak', '清算系统正常文档.docx']
+    .forEach(name => fs.writeFileSync(path.join(verDir, name), 'x'));
+  const r = await call('/api/specs/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: v })
+  });
+  assert.equal(r.json().success, true);
+  const rows = db.prepare('SELECT file_name FROM spec_documents WHERE version=?').all(v);
+  assert.deepEqual(rows.map(x => x.file_name), ['清算系统正常文档.docx'], '只应归档正常文档');
+});
+test('R. 归档树与临时文件', '树中文档按系统→需求单→需求点展开', async () => {
+  const v = '层级测试版本';
+  const verDir = path.join(tmpRoot, 'spec', v);
+  fs.mkdirSync(verDir, { recursive: true });
+  fs.writeFileSync(path.join(verDir, '清算系统层级文档.docx'), 'doc');
+  const o = db.prepare('INSERT INTO requirement_orders (order_number,name,department) VALUES (?,?,?)').run('TREE-01', '层级需求单', '清算部');
+  const oid = Number(o.lastInsertRowid);
+  const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)').run(oid, 'TREE-01001', '层级需求点');
+  const pid = Number(pt.lastInsertRowid);
+  db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)')
+    .run(meetingId, oid, pid, '清算系统', v, 0, null);
+  await call('/api/specs/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: v })
+  });
+  const d = (await call('/api/specs/tree')).json();
+  const entry = d.data.find(x => x.version === v);
+  assert.ok(entry, '树中应有该版本');
+  const doc = entry.wordVersions.find(x => x.file_name === '清算系统层级文档.docx');
+  assert.ok(doc, 'word版本分支应有该文档');
+  assert.equal(doc.archive_category, 'word_version');
+  assert.ok(Array.isArray(doc.allSystems), '文档应带 allSystems 层级');
+  assert.equal(doc.allSystems[0].name, '清算系统');
+  assert.equal(doc.allSystems[0].orders[0].order_number, 'TREE-01');
+  assert.equal(doc.allSystems[0].orders[0].points[0].point_id, pid);
+});
+test('R. 归档树与临时文件', '手工匹配成功后原地刷新且保留展开与滚动状态', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'specs.js'), 'utf8');
+  const a = src.indexOf('async function confirmSpecMatch()');
+  const b = src.indexOf('async function deleteSpec(', a);
+  const body = src.slice(a, b);
+  assert.ok(body.length > 0);
+  assert.ok(body.includes('closeModal'));
+  assert.ok(body.includes('refreshSpecAfterMatch'), '匹配成功后应触发原地刷新');
+  assert.ok(!body.includes('navigate('), '不应跳转页面');
+  const helper = src.slice(src.indexOf('async function refreshSpecAfterMatch('), a);
+  assert.ok(helper.includes('window.scrollY') && helper.includes('scrollTo'), '应保留滚动位置');
+  assert.ok(helper.includes('tree-children'), '应保留分支展开状态');
+  assert.ok(helper.includes('loadSpecQuery'), '文档查询 Tab 也应同步刷新');
+});
+
+// ==================================================================
+// S. 需规扫描规则收紧：无系统跳过 / 部门名过滤需求单
+// ==================================================================
+test('S. 扫描规则收紧', '匹配不到系统的文档跳过归档并反馈文件名', async () => {
+  const v = '无系统跳过测试版本';
+  const verDir = path.join(tmpRoot, 'spec', v);
+  fs.mkdirSync(verDir, { recursive: true });
+  fs.writeFileSync(path.join(verDir, '无系统文档.docx'), 'skip');
+  fs.writeFileSync(path.join(verDir, '清算系统正常文档.docx'), 'keep');
+  // 先造一条旧记录，验证跳过的文件旧记录也会被清理
+  db.prepare("INSERT INTO spec_documents (version,file_name,file_path,doc_type,archive_category,matched_systems) VALUES (?,?,?,'spec_doc','word_version','-')")
+    .run(v, '无系统文档.docx', path.join(verDir, '无系统文档.docx'));
+
+  const r = (await call('/api/specs/scan', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ version: v })
+  })).json();
+  assert.equal(r.success, true);
+  assert.equal(r.skipped_count, 1, '应跳过 1 个未匹配系统的文档');
+  assert.ok(r.skipped.includes('无系统文档.docx'));
+  assert.match(r.message, /跳过 1 个未匹配到系统的文档/);
+  assert.match(r.message, /改名包含系统名或系统别名/);
+  assert.equal(r.count, 1, '仅归档匹配到系统的文档');
+
+  const recs = db.prepare('SELECT file_name, matched_systems FROM spec_documents WHERE version=?').all(v);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].file_name, '清算系统正常文档.docx');
+  assert.notEqual(recs[0].matched_systems, '-');
+  const entry = (await call('/api/specs/tree')).json().data.find(x => x.version === v);
+  assert.equal(entry.wordVersions.length, 1, '树中不应出现未匹配系统的文档');
+});
+
+test('S. 扫描规则收紧', '占位符 "-" 不被当作系统名参与匹配', async () => {
+  const add = await call('/api/config', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ category: 'system', label: '-' })
+  });
+  assert.equal(add.json().success, true);
+  try {
+    const v = '占位系统测试版本';
+    const verDir = path.join(tmpRoot, 'spec', v);
+    fs.mkdirSync(verDir, { recursive: true });
+    fs.writeFileSync(path.join(verDir, '占位-测试.docx'), 'placeholder');
+    const r = (await call('/api/specs/scan', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ version: v })
+    })).json();
+    assert.equal(r.skipped_count, 1, '"-" 命中不应归档');
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM spec_documents WHERE version=?').get(v).c, 0);
+    const sysList = (await call('/api/specs/systems?version=' + encodeURIComponent(v))).json().data.systems;
+    assert.ok(!sysList.includes('-'), '下拉选项不应出现占位系统 "-"');
+    const filters = (await call('/api/specs/query?page=1&pageSize=1')).json().filters;
+    assert.ok(!filters.systems.includes('-'), '查询筛选不应出现占位系统 "-"');
+  } finally {
+    await call('/api/config/system/' + encodeURIComponent('-'), { method: 'DELETE' });
+  }
+});
+
+test('S. 部门名过滤', '文件名含部门名时只关联该部门提出的需求单', async () => {
+  const v = '部门过滤测试版本';
+  const verDir = path.join(tmpRoot, 'spec', v);
+  fs.mkdirSync(verDir, { recursive: true });
+  fs.writeFileSync(path.join(verDir, '清算系统清算部需求规格.docx'), 'doc');
+
+  const mk = (num, dept) => {
+    const o = db.prepare('INSERT INTO requirement_orders (order_number,name,department) VALUES (?,?,?)').run(num, '部门过滤单', dept);
+    return Number(o.lastInsertRowid);
+  };
+  const oidA = mk('DEP-01', '清算部');
+  const oidB = mk('DEP-02', '交易中心');
+  const pA = Number(db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)')
+    .run(oidA, 'DEP-01001', '清算部需求点').lastInsertRowid);
+  const pB = Number(db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)')
+    .run(oidB, 'DEP-02001', '交易中心需求点').lastInsertRowid);
+  for (const [oid, pid] of [[oidA, pA], [oidB, pB]]) {
+    db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)')
+      .run(meetingId, oid, pid, '清算系统', v, 0, null);
+  }
+
+  const scan = (await call('/api/specs/scan', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ version: v })
+  })).json();
+  assert.equal(scan.skipped_count, 0);
+  const spec = db.prepare('SELECT * FROM spec_documents WHERE version=?').get(v);
+  assert.equal(spec.matched_systems, '清算系统');
+  assert.equal(spec.matched_department, '清算部');
+  const linked = db.prepare('SELECT point_id FROM spec_document_points WHERE spec_id=?').all(spec.id).map(x => x.point_id);
+  assert.deepEqual(linked, [pA], '只应关联清算部的需求点');
+
+  // 树层级：系统下只出现清算部的需求单
+  const entry = (await call('/api/specs/tree?version=' + encodeURIComponent(v))).json().data[0];
+  const doc = entry.wordVersions[0];
+  assert.equal(doc.matched_department, '清算部');
+  const sysNode = doc.allSystems.find(x => x.name === '清算系统');
+  assert.ok(sysNode);
+  assert.deepEqual(sysNode.orders.map(o => o.order_number), ['DEP-01']);
+  assert.deepEqual(sysNode.orders[0].points.map(p => p.point_id), [pA]);
+
+  // 文档查询：关联字段与部门筛选口径一致
+  const q = (await call('/api/specs/query?version=' + encodeURIComponent(v))).json();
+  const row = q.items.find(x => x.id === spec.id);
+  assert.ok(row);
+  assert.equal(row.related_orders, 'DEP-01');
+  assert.equal(row.related_departments, '清算部');
+  const wrong = (await call('/api/specs/query?version=' + encodeURIComponent(v) + '&department=' + encodeURIComponent('交易中心'))).json();
+  assert.equal(wrong.total, 0, '交易中心不应查到限定清算部的文档');
+  const right = (await call('/api/specs/query?version=' + encodeURIComponent(v) + '&department=' + encodeURIComponent('清算部'))).json();
+  assert.equal(right.total, 1);
+
+  // 匹配弹窗预览也按部门收窄
+  const preview = (await call('/api/specs/systems?version=' + encodeURIComponent(v) + '&department=' + encodeURIComponent('清算部'))).json();
+  assert.deepEqual(preview.data.systemGroups['清算系统'].map(p => p.id), [pA]);
+});
+
+test('S. 部门名过滤', '手动匹配不允许空系统或占位系统', async () => {
+  const v = '手动校验测试版本';
+  const verDir = path.join(tmpRoot, 'spec', v);
+  fs.mkdirSync(verDir, { recursive: true });
+  fs.writeFileSync(path.join(verDir, '清算系统手动校验.docx'), 'doc');
+  await call('/api/specs/scan', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ version: v }) });
+  const id = db.prepare('SELECT id FROM spec_documents WHERE version=?').get(v).id;
+  const empty = await call('/api/specs/' + id + '/match', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ systems: [] })
+  });
+  assert.equal(empty.status, 400, '禁止无系统匹配');
+  const placeholder = await call('/api/specs/' + id + '/match', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ systems: ['-'] })
+  });
+  assert.equal(placeholder.status, 400, '禁止占位符系统');
+});
+
+test('S. 扫描规则收紧', '页面规则说明已补充且不再用 "-" 充当系统占位', () => {
+  const specs = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'specs.js'), 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  assert.ok(!specs.includes('style="color:#ccc">-'), '空的匹配系统不应显示为 "-"');
+  assert.ok(specs.includes('未匹配'), '应有未匹配的明确文案');
+  assert.ok(html.includes('否则跳过不归档'), '目录规则应说明跳过策略');
+  assert.ok(html.includes('部门名'), '目录规则应说明部门限定');
+  assert.ok(html.includes('spec-match-department'), '匹配弹窗应展示部门限定');
+});
+
+// ==================================================================
+// T. 会议管理分页与筛选
+// ==================================================================
+test('T. 会议分页筛选', '无参数仍返回全量列表，兼容下拉调用', async () => {
+  // 测试库只有自动化创建的会议，这里补两场 CCB 会议作为筛选样本
+  for (const m of [
+    { meeting_name: 'CCB第21次会议-7月评审', meeting_date: '2026-07-15', notes: '评审Q3第一批次：交易性能优化' },
+    { meeting_name: 'CCB第22次会议-8月评审', meeting_date: '2026-08-15', notes: '评审Q3第二批次：风控接口升级' }
+  ]) {
+    const r = await call('/api/meetings', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(m) });
+    assert.equal(r.json().success, true);
+  }
+  const d = (await call('/api/meetings')).json();
+  assert.equal(d.success, true);
+  assert.ok(Array.isArray(d.data));
+  assert.ok(d.data.length >= 3);
+  assert.ok(d.data.every(m => m.schedule_summary), '每项带排期概要');
+});
+
+test('T. 会议分页筛选', '仅显示CCB会议按名称过滤（不区分大小写）', async () => {
+  await call('/api/meetings', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ meeting_name: '月度需求评审会', meeting_date: '2026-09-01', notes: '非CCB' }) });
+  await call('/api/meetings', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ meeting_name: 'ccb第23次会议', meeting_date: '2026-09-02', notes: '小写ccb' }) });
+  const all = (await call('/api/meetings')).json().data;
+  assert.ok(all.some(m => m.meeting_name === '月度需求评审会'));
+  const ccb = (await call('/api/meetings?ccb_only=1')).json().data;
+  assert.ok(ccb.length >= 3);
+  assert.ok(ccb.every(m => /ccb/i.test(m.meeting_name)), '只返回名称含CCB的会议');
+  assert.ok(!ccb.some(m => m.meeting_name === '月度需求评审会'));
+  assert.ok(ccb.some(m => m.meeting_name === 'ccb第23次会议'), '小写 ccb 也应命中');
+});
+
+test('T. 会议分页筛选', '关键字与日期范围筛选', async () => {
+  const byName = (await call('/api/meetings?keyword=' + encodeURIComponent('第21次'))).json().data;
+  assert.equal(byName.length, 1);
+  assert.equal(byName[0].meeting_name, 'CCB第21次会议-7月评审');
+  const byNotes = (await call('/api/meetings?keyword=' + encodeURIComponent('Q3第二批次'))).json().data;
+  assert.equal(byNotes.length, 1);
+  const range = (await call('/api/meetings?date_from=2026-08-01&date_to=2026-08-31')).json().data;
+  assert.equal(range.length, 1);
+  assert.ok(range.every(m => m.meeting_date >= '2026-08-01' && m.meeting_date <= '2026-08-31'));
+});
+
+test('T. 会议分页筛选', '分页返回页码信息且各页不重复', async () => {
+  const p1 = (await call('/api/meetings?page=1&pageSize=2')).json();
+  assert.equal(p1.data.length, 2);
+  assert.equal(p1.page, 1);
+  assert.equal(p1.pageSize, 2);
+  assert.ok(p1.total >= 4);
+  assert.ok(p1.totalPages >= 2);
+  const p2 = (await call('/api/meetings?page=2&pageSize=2')).json();
+  assert.equal(p2.data.length, 2);
+  const ids1 = p1.data.map(m => m.id);
+  assert.ok(p2.data.every(m => !ids1.includes(m.id)), '不同页不应重复');
+  const filtered = (await call('/api/meetings?ccb_only=1&page=1&pageSize=1')).json();
+  assert.equal(filtered.data.length, 1);
+  assert.ok(filtered.total >= 3, '筛选后的 total 应为筛选结果数');
+});
+
+test('T. 会议分页筛选', '页面提供筛选栏与分页器', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const js = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'meetings.js'), 'utf8');
+  ['mtg-keyword', 'mtg-date-from', 'mtg-date-to', 'mtg-ccb-only', 'meetings-pagination', 'meeting-result-info']
+    .forEach(id => assert.ok(html.includes('id="' + id + '"'), '缺少 ' + id));
+  assert.ok(html.includes('仅显示CCB会议'));
+  assert.ok(js.includes("renderPagination('meetings-pagination'"));
+  assert.ok(js.includes('async function loadMeetings(page)'));
+  assert.ok(js.includes('resetMeetingFilter'));
+});
+
+// ==================================================================
+// U. 业务参数自定义排序
+// ==================================================================
+test('U. 业务参数排序', '按完整顺序列表重排并持久化', async () => {
+  const before = (await call('/api/config/department')).json().data;
+  assert.equal(before.length, 3);
+  const order = [before[2], before[0], before[1]];
+  const r = await call('/api/config/department/order', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ labels: order })
+  });
+  assert.equal(r.json().success, true);
+  assert.deepEqual((await call('/api/config/department')).json().data, order);
+  await call('/api/config/department/order', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ labels: before })
+  });
+  assert.deepEqual((await call('/api/config/department')).json().data, before, '应能还原顺序');
+});
+
+test('U. 业务参数排序', '拒绝不完整/重复/未知条目', async () => {
+  const before = (await call('/api/config/system')).json().data;
+  const invalid = [
+    before.slice(0, 1),
+    [before[0], before[0], before[1], before[2]],
+    [before[0], before[1], before[2], '未知系统']
+  ];
+  for (const labels of invalid) {
+    const r = await call('/api/config/system/order', {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ labels })
+    });
+    assert.equal(r.status, 400);
+    assert.equal(r.json().success, false);
+  }
+  assert.deepEqual((await call('/api/config/system')).json().data, before, '非法排序不应改动配置');
+});
+
+test('U. 业务参数排序', '页面支持拖拽排序，部门与系统别名可改名', () => {
+  const js = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'config.js'), 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  ['configDragStart', 'configDrop', 'configDragEnd'].forEach(fn => assert.ok(js.includes(fn), '缺少 ' + fn));
+  assert.ok(js.includes("'/order'"), '应提交排序接口');
+  assert.ok(js.includes('draggable="true"'));
+  assert.ok(html.includes('拖拽调整顺序'));
+  assert.ok(html.includes('系统别名</b>只影响后续目录扫描'));
+  assert.ok(js.includes("['system_alias', 'department', 'project', 'version']"), '部门、项目、版本与系统别名显示修改按钮');
+  assert.ok(js.includes('update_history'), '应提交历史数据处理选项');
+  assert.ok(html.includes('config-rename-options'));
+  assert.ok(js.includes('showEditConfig') && js.includes('editingConfigLabel'));
+});
+
+// ==================================================================
+// V. 系统别名修改（影响可控，单独开放）
+// ==================================================================
+test('V. 系统别名修改', '支持原地改名并保持位置不变', async () => {
+  const before = (await call('/api/config/system_alias')).json().data;
+  const old = '测试别名=测试,测试简称';
+  const next = '测试别名=测试,测试简写';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ category: 'system_alias', label: old }) });
+  const list = (await call('/api/config/system_alias')).json().data;
+  assert.ok(list.includes(old));
+
+  const r = await call('/api/config/system_alias/' + encodeURIComponent(old), {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: next })
+  });
+  assert.equal(r.json().success, true);
+  const after = (await call('/api/config/system_alias')).json().data;
+  assert.ok(after.includes(next) && !after.includes(old));
+  assert.deepEqual(after, list.map(x => x === old ? next : x), '改名后应保持原位置');
+
+  await call('/api/config/system_alias/' + encodeURIComponent(next), {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: old })
+  });
+  await call('/api/config/system_alias/' + encodeURIComponent(old), { method: 'DELETE' });
+  assert.deepEqual((await call('/api/config/system_alias')).json().data, before, '应还原测试前状态');
+});
+
+test('V. 系统别名修改', '拒绝空名/重复名/不存在的原名', async () => {
+  for (const label of ['别名A=甲', '别名B=乙']) {
+    await call('/api/config', { method: 'POST', headers: jsonHeaders,
+      body: JSON.stringify({ category: 'system_alias', label }) });
+  }
+  const put = (oldLabel, label) => call('/api/config/system_alias/' + encodeURIComponent(oldLabel), {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label })
+  });
+  assert.equal((await put('别名A=甲', '')).status, 400);
+  assert.equal((await put('别名A=甲', '别名B=乙')).status, 400);
+  assert.equal((await put('不存在', '新名=丙')).status, 400);
+  const after = (await call('/api/config/system_alias')).json().data;
+  assert.ok(after.includes('别名A=甲') && after.includes('别名B=乙'), '非法修改不应改动配置');
+  for (const label of ['别名A=甲', '别名B=乙']) {
+    await call('/api/config/system_alias/' + encodeURIComponent(label), { method: 'DELETE' });
+  }
+});
+
+test('V. 系统别名修改', '其它业务参数分类仍禁止改名', async () => {
+  const r = await call('/api/config/system/' + encodeURIComponent('清算系统'), {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: '系统改名测试' })
+  });
+  assert.equal(r.status, 400);
+  assert.ok((await call('/api/config/system')).json().data.includes('清算系统'));
+});
+
+// ==================================================================
+// W. 禁止处理涉密信息提醒
+// ==================================================================
+test('W. 安全提醒', '主界面与登录页均保留精简的涉密禁令', () => {
+  const index = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'public', 'css', 'style.css'), 'utf8');
+  const login = fs.readFileSync(path.join(ROOT, 'public', 'login.html'), 'utf8');
+  assert.ok(index.includes('security-notice'), '主界面应有安全提醒条');
+  assert.ok(/<div class="security-notice">严禁处理涉密信息<\/div>/.test(index), '主界面提醒应精简为「严禁处理涉密信息」');
+  assert.ok(/\.security-notice\{[^}]*position:sticky/.test(css), '提醒条样式应保留 position:sticky');
+  assert.ok(login.includes('security-banner'), '登录页应有安全提醒');
+  assert.ok(/<div class="security-banner">严禁处理涉密信息<\/div>/.test(login), '登录页提醒应精简为「严禁处理涉密信息」');
+});
+
+// ==================================================================
+// Y. 部门改名与历史数据更新
+// ==================================================================
+const cfgModule = require('../server/config.js');
+
+test('Y. 部门改名', '影响预览准确，仅改配置时历史数据保留原名且旧名成为别名', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名测试部', NEW = '新测试部';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'department', label: OLD }) });
+  const o1 = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments) VALUES (?,?,?,?)')
+    .run('RM-RENAME-1', '改名测试单1', OLD, OLD + ',清算部').lastInsertRowid;
+  const o2 = db.prepare('INSERT INTO requirement_orders (order_number,name,department) VALUES (?,?,?)')
+    .run('RM-RENAME-2', '改名测试单2', OLD).lastInsertRowid;
+  const d1 = db.prepare('INSERT INTO spec_documents (version,file_name,file_path,matched_department) VALUES (?,?,?,?)')
+    .run('v1', 'rename.docx', '/tmp/rename.docx', OLD).lastInsertRowid;
+  try {
+    const impact = (await call('/api/config/department/rename-impact?label=' + encodeURIComponent(OLD))).json();
+    assert.equal(impact.success, true);
+    assert.deepEqual({ orders: impact.data.orders, relatedOrders: impact.data.relatedOrders, specDocs: impact.data.specDocs, total: impact.data.total },
+      { orders: 2, relatedOrders: 1, specDocs: 1, total: 4 });
+
+    const r = await call('/api/config/department/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: false })
+    });
+    assert.equal(r.json().success, true);
+    assert.ok((await call('/api/config/department')).json().data.includes(NEW));
+
+    assert.equal(db.prepare('SELECT department FROM requirement_orders WHERE id=?').get(o1).department, OLD);
+    assert.equal(db.prepare('SELECT related_departments FROM requirement_orders WHERE id=?').get(o1).related_departments, OLD + ',清算部');
+    assert.equal(db.prepare('SELECT matched_department FROM spec_documents WHERE id=?').get(d1).matched_department, OLD);
+
+    assert.ok((await call('/api/config')).json().data.department_alias.includes(NEW + '=' + OLD), '旧名应保留为别名');
+    const list = (await call('/api/orders?department=' + encodeURIComponent(NEW))).json();
+    assert.ok(list.items.some(o => o.order_number === 'RM-RENAME-1'), '按新名筛选应能查到旧名需求单');
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM requirement_orders WHERE id IN (?,?)').run(o1, o2);
+    db.prepare('DELETE FROM spec_documents WHERE id=?').run(d1);
+  }
+});
+
+test('Y. 部门改名', '同步更新历史数据，逗号分隔字段按 token 精确替换', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名测试部2', NEW = '新测试部2', OLDER = '更老的名称';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'department', label: OLD }) });
+  cfgModule.getAll().department_alias.push(OLD + '=' + OLDER); // 预置链式别名
+  const o1 = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments) VALUES (?,?,?,?)')
+    .run('RM-RENAME-3', '改名测试单3', OLD, OLD + ',清算部,改名测试部20').lastInsertRowid;
+  const o2 = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments) VALUES (?,?,?,?)')
+    .run('RM-RENAME-4', '改名测试单4', '清算部', OLD).lastInsertRowid;
+  const d1 = db.prepare('INSERT INTO spec_documents (version,file_name,file_path,matched_department) VALUES (?,?,?,?)')
+    .run('v1', 'rename2.docx', '/tmp/rename2.docx', OLD + ',清算部').lastInsertRowid;
+  try {
+    const r = await call('/api/config/department/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: true })
+    });
+    assert.equal(r.json().success, true);
+    assert.deepEqual(r.json().data.history, { orders: 1, relatedOrders: 2, specDocs: 1, total: 4 });
+
+    assert.equal(db.prepare('SELECT department FROM requirement_orders WHERE id=?').get(o1).department, NEW);
+    assert.equal(db.prepare('SELECT department FROM requirement_orders WHERE id=?').get(o2).department, '清算部', '非该部门的需求单不应被改动');
+    assert.equal(db.prepare('SELECT related_departments FROM requirement_orders WHERE id=?').get(o1).related_departments,
+      NEW + ',清算部,改名测试部20', '相似名称不应被子串替换');
+    assert.equal(db.prepare('SELECT related_departments FROM requirement_orders WHERE id=?').get(o2).related_departments, NEW);
+    assert.equal(db.prepare('SELECT matched_department FROM spec_documents WHERE id=?').get(d1).matched_department, NEW + ',清算部');
+
+    const aliases = (await call('/api/config')).json().data.department_alias;
+    assert.ok(aliases.includes(NEW + '=' + OLD + ',' + OLDER), '改名应合并并展平旧别名');
+    assert.ok(!aliases.some(a => a.startsWith(OLD + '=')), '旧键应被移除');
+    const list = (await call('/api/orders?department=' + encodeURIComponent(OLDER))).json();
+    assert.ok(list.items.some(o => o.order_number === 'RM-RENAME-3'), '旧别名筛选应等价到新部门');
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM requirement_orders WHERE id IN (?,?)').run(o1, o2);
+    db.prepare('DELETE FROM spec_documents WHERE id=?').run(d1);
+  }
+});
+
+test('Y. 部门改名', '拒绝空名、重名与不存在的原名', async () => {
+  const snapshot = cfgModule.snapshot();
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'department', label: '改名校验部' }) });
+  const put = (oldLabel, label) => call('/api/config/department/' + encodeURIComponent(oldLabel), {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label, update_history: true })
+  });
+  try {
+    assert.equal((await put('改名校验部', '')).status, 400);
+    assert.equal((await put('改名校验部', '清算部')).status, 400);
+    assert.equal((await put('不存在部门', '新名')).status, 400);
+    const list = (await call('/api/config/department')).json().data;
+    assert.ok(list.includes('改名校验部') && list.includes('清算部'), '非法改名不应改动配置');
+  } finally { cfgModule.restore(snapshot); }
+});
+
+// ==================================================================
+// Z. 项目改名与历史数据更新
+// ==================================================================
+test('Z. 项目改名', '影响预览与同步更新历史排期，旧名保留为别名', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名测试项目', NEW = '新测试项目';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'project', label: OLD }) });
+  const o = db.prepare('INSERT INTO requirement_orders (order_number,name) VALUES (?,?)').run('RM-PROJ-1', '项目改名单');
+  const oid = Number(o.lastInsertRowid);
+  const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)')
+    .run(oid, 'RM-PROJ-P1', '项目改名需求点');
+  const pid = Number(pt.lastInsertRowid);
+  const sid = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,1,?)')
+    .run(meetingId, oid, pid, '清算系统', 'v1', OLD).lastInsertRowid;
+  const doc = db.prepare("INSERT INTO spec_documents (version,file_name,file_path,doc_type) VALUES (?,?,?,'spec_doc')")
+    .run('v1', 'proj.docx', '/tmp/proj.docx').lastInsertRowid;
+  db.prepare('INSERT INTO spec_document_points (spec_id,point_id) VALUES (?,?)').run(doc, pid);
+  try {
+    const impact = (await call('/api/config/project/rename-impact?label=' + encodeURIComponent(OLD))).json();
+    assert.deepEqual(impact.data, { schedules: 1, total: 1 });
+
+    const r = await call('/api/config/project/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: true })
+    });
+    assert.equal(r.json().success, true);
+    assert.deepEqual(r.json().data.history, { schedules: 1, total: 1 });
+    assert.equal(db.prepare('SELECT project_name FROM ccb_schedules WHERE id=?').get(sid).project_name, NEW);
+    assert.ok((await call('/api/config')).json().data.project_alias.includes(NEW + '=' + OLD));
+
+    const list = (await call('/api/specs/query?project_name=' + encodeURIComponent(OLD))).json();
+    assert.ok(list.items.some(x => x.id === doc), '旧项目名筛选应等价到新项目');
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM spec_document_points WHERE spec_id=?').run(doc);
+    db.prepare('DELETE FROM spec_documents WHERE id=?').run(doc);
+    db.prepare('DELETE FROM requirement_orders WHERE id=?').run(oid);
+  }
+});
+
+test('Z. 项目改名', '仅改配置时历史排期保留原名', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名测试项目2', NEW = '新测试项目2';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'project', label: OLD }) });
+  const o = db.prepare('INSERT INTO requirement_orders (order_number,name) VALUES (?,?)').run('RM-PROJ-2', '项目改名单2');
+  const oid = Number(o.lastInsertRowid);
+  const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description) VALUES (?,?,?)')
+    .run(oid, 'RM-PROJ-P2', '项目改名需求点2');
+  const pid = Number(pt.lastInsertRowid);
+  const sid = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,1,?)')
+    .run(meetingId, oid, pid, '清算系统', 'v1', OLD).lastInsertRowid;
+  try {
+    const r = await call('/api/config/project/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: false })
+    });
+    assert.equal(r.json().success, true);
+    assert.ok((await call('/api/config/project')).json().data.includes(NEW));
+    assert.equal(db.prepare('SELECT project_name FROM ccb_schedules WHERE id=?').get(sid).project_name, OLD);
+    assert.ok((await call('/api/config')).json().data.project_alias.includes(NEW + '=' + OLD));
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM requirement_orders WHERE id=?').run(oid);
+  }
+});
+
+// ==================================================================
+// AA. 版本改名与历史数据更新
+// ==================================================================
+test('AA. 版本改名', '影响预览与同步更新历史版本，旧版本目录仍可扫描', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名版本测试V', NEW = '改名版本测试V新';
+  const verDir = path.join(tmpRoot, 'spec', OLD);
+  fs.mkdirSync(verDir, { recursive: true });
+  const fileName = '清算系统需求规格.docx';
+  fs.writeFileSync(path.join(verDir, fileName), 'x');
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'version', label: OLD }) });
+  const o = db.prepare('INSERT INTO requirement_orders (order_number,name) VALUES (?,?)').run('RM-VER-1', '版本改名单');
+  const oid = Number(o.lastInsertRowid);
+  const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,version) VALUES (?,?,?,?)')
+    .run(oid, 'RM-VER-P1', '版本改名需求点', OLD);
+  const pid = Number(pt.lastInsertRowid);
+  const sid = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project) VALUES (?,?,?,?,?,0)')
+    .run(meetingId, oid, pid, '清算系统', OLD).lastInsertRowid;
+  const oldDoc = db.prepare("INSERT INTO spec_documents (version,file_name,file_path,doc_type) VALUES (?,?,?,'spec_doc')")
+    .run(OLD, 'old-ver.docx', path.join(verDir, 'old-ver.docx')).lastInsertRowid;
+  try {
+    const impact = (await call('/api/config/version/rename-impact?label=' + encodeURIComponent(OLD))).json();
+    assert.deepEqual(impact.data, { points: 1, schedules: 1, specDocs: 1, total: 3 });
+
+    const r = await call('/api/config/version/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: true })
+    });
+    assert.equal(r.json().success, true);
+    assert.deepEqual(r.json().data.history, { points: 1, schedules: 1, specDocs: 1, total: 3 });
+    assert.equal(db.prepare('SELECT version FROM requirement_points WHERE id=?').get(pid).version, NEW);
+    assert.equal(db.prepare('SELECT version FROM ccb_schedules WHERE id=?').get(sid).version, NEW);
+    assert.equal(db.prepare('SELECT version FROM spec_documents WHERE id=?').get(oldDoc).version, NEW);
+    assert.ok((await call('/api/config')).json().data.version_alias.includes(NEW + '=' + OLD));
+
+    // 磁盘目录仍是旧名时，按新版本名扫描仍应命中并写入新版本名
+    const scan = await call('/api/specs/scan', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({ version: NEW })
+    });
+    assert.equal(scan.json().success, true);
+    assert.notEqual(scan.json().data.skipBecauseMissingVersionDir, true);
+    const scanned = db.prepare('SELECT id FROM spec_documents WHERE file_name=? AND version=?').get(fileName, NEW);
+    assert.ok(scanned, '旧目录中的文件应归档到新版本名');
+
+    const q = (await call('/api/specs/query?version=' + encodeURIComponent(OLD))).json();
+    assert.ok(q.items.some(x => x.id === scanned.id), '旧版本名筛选应等价到新版本');
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM spec_documents WHERE version IN (?,?)').run(OLD, NEW);
+    db.prepare('DELETE FROM requirement_orders WHERE id=?').run(oid);
+    fs.rmSync(path.join(tmpRoot, 'spec', OLD), { recursive: true, force: true });
+    fs.rmSync(path.join(tmpRoot, 'spec', NEW), { recursive: true, force: true });
+  }
+});
+
+test('AA. 版本改名', '仅改配置时历史版本保留原名', async () => {
+  const snapshot = cfgModule.snapshot();
+  const OLD = '改名版本测试V2', NEW = '改名版本测试V2新';
+  await call('/api/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'version', label: OLD }) });
+  const o = db.prepare('INSERT INTO requirement_orders (order_number,name) VALUES (?,?)').run('RM-VER-2', '版本改名单2');
+  const oid = Number(o.lastInsertRowid);
+  const pt = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,version) VALUES (?,?,?,?)')
+    .run(oid, 'RM-VER-P2', '版本改名需求点2', OLD);
+  const pid = Number(pt.lastInsertRowid);
+  const sid = db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project) VALUES (?,?,?,?,?,0)')
+    .run(meetingId, oid, pid, '清算系统', OLD).lastInsertRowid;
+  try {
+    const r = await call('/api/config/version/' + encodeURIComponent(OLD), {
+      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ label: NEW, update_history: false })
+    });
+    assert.equal(r.json().success, true);
+    assert.ok((await call('/api/config/version')).json().data.includes(NEW));
+    assert.equal(db.prepare('SELECT version FROM requirement_points WHERE id=?').get(pid).version, OLD);
+    assert.equal(db.prepare('SELECT version FROM ccb_schedules WHERE id=?').get(sid).version, OLD);
+    assert.ok((await call('/api/config')).json().data.version_alias.includes(NEW + '=' + OLD));
+    const q = (await call('/api/specs/query?version=' + encodeURIComponent(NEW))).json();
+    assert.ok(Array.isArray(q.items));
+  } finally {
+    cfgModule.restore(snapshot);
+    db.prepare('DELETE FROM requirement_orders WHERE id=?').run(oid);
+  }
 });
 
 // ------------------------------------------------------------------

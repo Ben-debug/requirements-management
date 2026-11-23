@@ -3,6 +3,7 @@
  * 导出（全部/筛选）、导入模板下载、Excel 导入
  */
 const { getDatabase } = require('../database');
+const config = require('../config');
 const { normalizeDate } = require('../utils');
 const { createUploadMiddleware } = require('../middleware/upload');
 const xlsx = require('xlsx');
@@ -29,7 +30,11 @@ module.exports = function (app) {
       const { department, keyword, date_from, date_to, is_project, meeting_name } = req.query;
       let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
       const params = [];
-      if (department) { sql += ' AND department=?'; params.push(department); }
+      if (department) {
+        const names = config.expandNames('department', department);
+        sql += ` AND department IN (${names.map(() => '?').join(',')})`;
+        params.push(...names);
+      }
       if (keyword) { const k = `%${keyword}%`; sql += ' AND (order_number LIKE ? OR name LIKE ? OR proposer LIKE ?)'; params.push(k, k, k); }
       if (date_from) { sql += ' AND propose_date >= ?'; params.push(date_from); }
       if (date_to) { sql += ' AND propose_date <= ?'; params.push(date_to); }

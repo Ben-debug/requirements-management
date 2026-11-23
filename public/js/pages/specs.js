@@ -77,33 +77,94 @@ async function loadSpecTree() {
   } catch (e) { console.error('loadSpecTree error:', e); }
 }
 
-// 通用文件类型分支：评审会议纪要 / word版本 / 签字扫描件
+// 评审会议纪要分支（叶子节点）
 function renderFileTypeBranch(cfg) {
   const items = cfg.items || [];
   const has = items.length > 0;
   const rows = has ? items.map(item => {
     const open = fileOpenInfo({ id: item.id, file_name: item.file_name }, '/api/specs/' + item.id);
-    const deleteFn = cfg.kind === 'meeting' ? 'deleteSpecMeeting' : 'deleteSpec';
-    const label = cfg.kind === 'meeting' ? (item.meeting_name || item.file_name) : item.file_name;
-    const desc = cfg.kind === 'meeting' && item.meeting_date
-      ? esc(item.meeting_date)
-      : (cfg.kind === 'meeting' && item.file_name ? esc(item.file_name) : '');
-    // 文档类条目保留系统匹配入口，并标注自动/手动匹配状态
-    const autoTag = cfg.kind === 'meeting' ? '' : (item.auto_matched
-      ? '<span class="badge badge-green" style="font-size:11px">🤖 自动</span>'
-      : '<span class="badge badge-orange" style="font-size:11px">✋ 手动</span>');
-    const matchBtn = cfg.kind === 'meeting' ? '' :
-      `<button class="btn-icon" onclick="event.stopPropagation();openSpecMatch(${item.id})" title="匹配系统">🔗</button>`;
+    const label = item.meeting_name || item.file_name;
+    const desc = item.meeting_date ? esc(item.meeting_date) : (item.file_name ? esc(item.file_name) : '');
     return `<div class="tree-node tree-meeting">
       <div class="tree-node-header" data-level="meeting" style="cursor:default">
         <span class="tree-arrow tree-arrow-empty"></span>
-        <span class="tree-icon">${cfg.kind === 'meeting' ? '📅' : '📄'}</span>
-        <span class="tree-label"><a href="${open.url}" class="file-link" target="_blank" rel="noopener noreferrer" title="${open.title}">${esc(label)}</a>${open.previewable ? ` <a href="${open.downloadUrl}" class="file-link" style="font-size:11px" title="下载文件" target="_blank" rel="noopener noreferrer">📥</a>` : ''}</span>${autoTag}
+        <span class="tree-icon">📅</span>
+        <span class="tree-label"><a href="${open.url}" class="file-link" target="_blank" rel="noopener noreferrer" title="${open.title}">${esc(label)}</a>${open.previewable ? ` <a href="${open.downloadUrl}" class="file-link" style="font-size:11px" title="下载文件" target="_blank" rel="noopener noreferrer">📥</a>` : ''}</span>
         ${desc ? `<span class="tree-desc">${desc}</span>` : ''}
         <span class="tree-meta">
-          ${matchBtn}
-          <button class="btn-icon btn-icon-danger" onclick="event.stopPropagation();${deleteFn}(${item.id})" title="删除">🗑️</button>
+          <button class="btn-icon btn-icon-danger" onclick="event.stopPropagation();deleteSpecMeeting(${item.id})" title="删除">🗑️</button>
         </span>
+      </div>
+    </div>`;
+  }).join('') : `<div class="tree-empty-hint">${cfg.emptyHint}</div>`;
+  return `<div class="tree-node tree-meetings">
+    <div class="tree-node-header" data-level="meetings">
+      <span class="tree-arrow ${has ? '' : 'tree-arrow-empty'}">${has ? '▶' : ''}</span>
+      <span class="tree-icon">${cfg.icon}</span>
+      <span class="tree-label">${cfg.label}</span>
+      <span class="tree-meta"><span class="tree-count">${items.length} ${cfg.unit || '个'}</span></span>
+    </div>
+    <div class="tree-children" style="display:none">${rows}</div>
+  </div>`;
+}
+
+// 归档文档分支：文档 → 系统 → 需求单 → 需求点
+function renderArchiveDocBranch(cfg) {
+  const items = cfg.items || [];
+  const has = items.length > 0;
+  const rows = has ? items.map(doc => {
+    const systems = doc.allSystems || [];
+    const hasSys = systems.length > 0;
+    const open = fileOpenInfo({ id: doc.id, file_name: doc.file_name }, '/api/specs/' + doc.id);
+    const autoTag = doc.auto_matched
+      ? '<span class="badge badge-green" style="font-size:11px">🤖 自动</span>'
+      : '<span class="badge badge-orange" style="font-size:11px">✋ 手动</span>';
+    const catTag = `<span class="badge" style="font-size:11px;background:#f0f5ff;color:#1890ff">${esc(cfg.label)}</span>`;
+    const deptTag = doc.matched_department
+      ? `<span class="badge" style="font-size:11px;background:#fff7e6;color:#fa8c16" title="仅关联该部门提出的需求单">部门：${esc(doc.matched_department)}</span>` : '';
+    return `<div class="tree-node tree-doc" data-id="${doc.id}">
+      <div class="tree-node-header" data-level="doc">
+        <span class="tree-arrow ${hasSys ? '' : 'tree-arrow-empty'}">${hasSys ? '▶' : ''}</span>
+        <span class="tree-icon">📄</span>
+        <span class="tree-label"><a href="${open.url}" class="file-link" target="_blank" rel="noopener noreferrer" title="${open.title}">${esc(doc.file_name)}</a>${open.previewable ? ` <a href="${open.downloadUrl}" class="file-link" style="font-size:11px" title="下载文件" target="_blank" rel="noopener noreferrer">📥</a>` : ''}</span>${autoTag}${catTag}${deptTag}
+        <span class="tree-meta">
+          <span class="tree-count">${hasSys ? systems.length : 0} 个系统</span>
+          <button class="btn-icon" onclick="event.stopPropagation();openSpecMatch(${doc.id})" title="匹配系统">🔗</button>
+          <button class="btn-icon btn-icon-danger" onclick="event.stopPropagation();deleteSpec(${doc.id})" title="删除">🗑️</button>
+        </span>
+      </div>
+      <div class="tree-children" style="display:none">
+        ${hasSys ? systems.map(sys => `
+          <div class="tree-node tree-system">
+            <div class="tree-node-header" data-level="system">
+              <span class="tree-arrow ${sys.orders.length ? '' : 'tree-arrow-empty'}">${sys.orders.length ? '▶' : ''}</span>
+              <span class="tree-icon">📦</span>
+              <span class="tree-label">${esc(sys.name)}</span>
+              <span class="tree-meta"><span class="tree-count">${sys.orders.length ? sys.orders.length + ' 个需求单' : '暂无排期'}</span></span>
+            </div>
+            <div class="tree-children" style="display:none">
+              ${sys.orders.length ? sys.orders.map(order => `
+                <div class="tree-node tree-order">
+                  <div class="tree-node-header" data-level="order">
+                    <span class="tree-arrow ${order.points.length ? '' : 'tree-arrow-empty'}">${order.points.length ? '▶' : ''}</span>
+                    <span class="tree-icon">📋</span>
+                    <span class="tree-label"><a href="javascript:void(0)" onclick="event.stopPropagation();viewOrderFromSpec(${order.order_id})" class="order-link" title="查看需求单详情">${esc(order.order_number)} ${esc(order.order_name)}</a></span>
+                    <span class="tree-meta"><span class="tree-count">${order.points.length} 个需求点</span></span>
+                  </div>
+                  <div class="tree-children" style="display:none">
+                    ${order.points.map(pt => `
+                      <div class="tree-node tree-point">
+                        <div class="tree-node-header" data-level="point" style="cursor:default">
+                          <span class="tree-arrow tree-arrow-empty"></span>
+                          <span class="tree-icon">📄</span>
+                          <span class="tree-label">${esc(pt.point_number)}</span>
+                          <span class="tree-desc">${esc(pt.description)}</span>
+                        </div>
+                      </div>`).join('')}
+                  </div>
+                </div>`).join('') : '<div class="tree-empty-hint">暂无排期数据</div>'}
+            </div>
+          </div>`).join('') : '<div class="tree-empty-hint">未匹配系统</div>'}
       </div>
     </div>`;
   }).join('') : `<div class="tree-empty-hint">${cfg.emptyHint}</div>`;
@@ -131,26 +192,23 @@ function renderSpecTree(versionGroups) {
         <span class="tree-icon">🏷️</span>
         <span class="tree-label tree-version-label">${esc(vg.version)}</span>
         <span class="tree-meta">
-          <span class="tree-count">${meetings.length} 份纪要</span>
-          <span class="tree-count" style="margin-left:8px">${words.length} word / ${signed.length} 扫描件</span>
+          <span class="tree-count">${words.length} 个 word版本</span>
+          <span class="tree-count" style="margin-left:8px">${signed.length} 份签字扫描件</span>
+          <span class="tree-count" style="margin-left:8px">${meetings.length} 份纪要</span>
         </span>
       </div>
       <div class="tree-children" style="display:none">`;
 
-    // ---- 三类归档分支：评审会议纪要 / word版本 / 签字扫描件 ----
     html += renderFileTypeBranch({
-      label: '评审会议纪要', icon: '📋', unit: '份', kind: 'meeting',
-      items: meetings,
+      label: '评审会议纪要', icon: '📋', unit: '份', items: meetings,
       emptyHint: '暂无评审会议纪要，请将文件放入版本目录后点击「扫描目录」'
     });
-    html += renderFileTypeBranch({
-      label: 'word版本', icon: '📝', unit: '个', kind: 'doc',
-      items: words,
+    html += renderArchiveDocBranch({
+      label: 'word版本', icon: '📝', unit: '个', items: words,
       emptyHint: '暂无 Word / Office 文档（非纪要、非 PDF 的文件归入此类）'
     });
-    html += renderFileTypeBranch({
-      label: '签字扫描件', icon: '🖊️', unit: '份', kind: 'doc',
-      items: signed,
+    html += renderArchiveDocBranch({
+      label: '签字扫描件', icon: '🖊️', unit: '份', items: signed,
       emptyHint: '暂无签字扫描件（PDF 文件归入此类）'
     });
 
@@ -190,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function scanSpecDocs() {
   const version = document.getElementById('spec-version-filter')?.value;
   if (!version) { showToast('请先选择版本', 'error'); return; }
-  if (!confirm(`确认为版本「${version}」扫描目录？\n\n📁 文件直接放入「需规目录/${version}/」，扫描只归三类：\n　· 文件名含「评审」或「纪要」（或旧 meetings 目录）→ 评审会议纪要\n　· PDF → 签字扫描件\n　· 其余 Word/Office 文件 → word版本\n💡 每个文件只保留一条归档记录，重复扫描按当前规则覆盖旧记录`)) return;
+  if (!confirm(`确认为版本「${version}」扫描目录？\n\n📁 文件直接放入「需规目录/${version}/」，扫描规则：\n　· 文件名含「评审」或「纪要」（或旧 meetings 目录）→ 评审会议纪要\n　· PDF → 签字扫描件\n　· 其余 Word/Office 文件 → word版本\n　· 非纪要文档的文件名必须包含系统名或系统别名，否则跳过不归档（避免出现非真实系统）\n　· 文件名含部门名时，该系统下只关联该部门提出的需求单\n💡 每个文件只保留一条归档记录，重复扫描按当前规则覆盖旧记录`)) return;
   const btn = document.querySelector('button[onclick="scanSpecDocs()"]');
   const orig = btn?.textContent || '🔍 扫描目录';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 扫描中...'; }
@@ -200,6 +258,8 @@ async function scanSpecDocs() {
     if (!d.success) throw new Error(d.message);
     if (d.skipBecauseMissingVersionDir) {
       showToast('⚠️ ' + d.message.replace(/\n/g, ' '), 'error', 8000);
+    } else if (d.skipped_count > 0) {
+      showToast('⚠️ ' + d.message.replace(/\n/g, ' '), 'error');
     } else if (d.count > 0 || d.meeting_count > 0) {
       showToast(d.message || ('✅ 发现 ' + d.count + ' 个文档，' + d.meeting_count + ' 份纪要'), 'success');
     } else {
@@ -222,11 +282,18 @@ async function openSpecMatch(id) {
     const spec = d.data;
     document.getElementById('spec-match-filename').textContent = spec.file_name;
     document.getElementById('spec-match-version-display').textContent = spec.version;
+    const deptBox = document.getElementById('spec-match-department');
+    if (deptBox) {
+      deptBox.textContent = spec.matched_department
+        ? `文档名含部门「${spec.matched_department}」，匹配的系统下仅关联该部门提出的需求单。`
+        : '文档名未含部门名称，关联该系统下全部提出部门的需求单。';
+    }
     document.getElementById('spec-match-id').value = spec.id;
     document.getElementById('spec-match-version').value = spec.version;
     document.getElementById('spec-match-preview').style.display = 'none';
 
-    const sysRes = await fetch('/api/specs/systems?version=' + encodeURIComponent(spec.version));
+    const sysRes = await fetch('/api/specs/systems?version=' + encodeURIComponent(spec.version)
+      + '&department=' + encodeURIComponent(spec.matched_department || ''));
     const sysData = await sysRes.json();
     if (!sysData.success) throw new Error(sysData.message);
 
@@ -259,6 +326,37 @@ function updateSpecMatchPreview(systemGroups) {
   preview.innerHTML = '📊 已选 <b>' + selected.length + '</b> 个系统，自动关联 <b>' + allPoints.length + '</b> 个排期需求点';
 }
 
+// 手工匹配成功后原地刷新：保留 Tab、展开状态与滚动位置，不跳转页面
+async function refreshSpecAfterMatch(docId) {
+  const treeTab = document.getElementById('tab-spec-tree');
+  if (treeTab && treeTab.style.display !== 'none') {
+    const container = document.getElementById('specs-list');
+    // 用索引记录每个分支的展开状态，重绘后按同样顺序还原（不依赖节点身份）
+    const expanded = container
+      ? Array.from(container.querySelectorAll('.tree-children')).map(el => el.style.display !== 'none') : null;
+    const scrollY = window.scrollY;
+    await loadSpecTree();
+    if (expanded && container) {
+      const blocks = container.querySelectorAll('.tree-children');
+      blocks.forEach((el, i) => {
+        if (i >= expanded.length) return;
+        el.style.display = expanded[i] ? 'block' : 'none';
+        const arrow = el.closest('.tree-node')?.querySelector(':scope > .tree-node-header .tree-arrow');
+        if (arrow && !arrow.classList.contains('tree-arrow-empty')) arrow.textContent = expanded[i] ? '▼' : '▶';
+      });
+    }
+    window.scrollTo(0, scrollY);
+    const header = container?.querySelector('.tree-doc[data-id="' + docId + '"] > .tree-node-header');
+    if (header) {
+      header.classList.add('spec-just-updated');
+      setTimeout(() => header.classList.remove('spec-just-updated'), 2500);
+    }
+  } else if (typeof loadSpecQuery === 'function') {
+    // 文档查询 Tab：复用当前筛选条件与页码，只刷新列表数据
+    await loadSpecQuery();
+  }
+}
+
 async function confirmSpecMatch() {
   const id = document.getElementById('spec-match-id').value;
   const sys = Array.from(document.querySelectorAll('#spec-match-systems .system-cb:checked')).map(cb => cb.value);
@@ -267,7 +365,7 @@ async function confirmSpecMatch() {
     const d = await api('/api/specs/' + id + '/match', { method: 'PUT', body: JSON.stringify({ systems: sys }) });
     showToast(d.message || '匹配已更新', 'success');
     closeModal('spec-match-modal');
-    loadSpecTree();
+    await refreshSpecAfterMatch(id);
   } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -298,7 +396,7 @@ const SPEC_CATEGORY_LABELS = {
 function specCategoryLabel(c) { return SPEC_CATEGORY_LABELS[c] || '-'; }
 function specBadgeList(raw) {
   const parts = String(raw || '').split(/[,，、\s]+/).filter(Boolean);
-  if (!parts.length) return '<span style="color:#ccc">-</span>';
+  if (!parts.length) return '<span style="color:#999">未匹配</span>';
   return parts.map(x => `<span class="badge badge-blue" title="${esc(x)}">${esc(x)}</span>`).join(' ');
 }
 
@@ -336,9 +434,11 @@ function specQueryRow(item) {
     ? '<span class="badge badge-green" title="按文件名自动匹配系统">🤖 自动</span>'
     : '<span class="badge badge-orange" title="手动匹配的系统">✋ 手动</span>';
   const open = fileOpenInfo({ id: item.id, file_name: item.file_name }, `/api/specs/${item.id}`);
+  const deptTag = item.matched_department
+    ? ` <span class="badge" style="font-size:11px;background:#fff7e6;color:#fa8c16" title="仅关联该部门提出的需求单">部门：${esc(item.matched_department)}</span>` : '';
   return `<tr class="query-row">
     <td title="${esc(item.file_name)}">
-      <a href="${open.url}" class="file-link" title="${open.title}" target="_blank" rel="noopener noreferrer">${esc(item.file_name)}</a>${open.previewable ? ` <a href="${open.downloadUrl}" class="file-link" style="font-size:11px" title="下载文件" target="_blank" rel="noopener noreferrer">📥</a>` : ''}
+      <a href="${open.url}" class="file-link" title="${open.title}" target="_blank" rel="noopener noreferrer">${esc(item.file_name)}</a>${deptTag}${open.previewable ? ` <a href="${open.downloadUrl}" class="file-link" style="font-size:11px" title="下载文件" target="_blank" rel="noopener noreferrer">📥</a>` : ''}
     </td>
     <td>${specCategoryLabel(item.archive_category)}</td>
     <td>${specBadgeList(item.matched_systems)}</td>

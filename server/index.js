@@ -92,6 +92,7 @@ require('./routes/schedules')(app);
 require('./routes/files')(app);
 require('./routes/specs')(app);
 require('./routes/config-routes')(app);
+require('./routes/ledgers')(app);
 require('./routes/import-export')(app);
 require('./routes/assessment')(app);
 require('./routes/backup-routes')(app);

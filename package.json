@@ -1,6 +1,6 @@
 {
   "name": "requirement-manager",
-  "version": "2.3.5",
+  "version": "2.3.6",
   "description": "我的工作平台",
   "main": "server/index.js",
   "bin": "server/index.js",

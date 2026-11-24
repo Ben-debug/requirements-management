@@ -22,6 +22,46 @@ async function loadDropdowns() {
   } catch (e) { console.error("loadDropdowns error:", e); }
 }
 
+// ---- 导航菜单显示模块 ----
+const NAV_MODULE_LABELS = {
+  orders: '📄 需求单管理',
+  meetings: '📅 排期管理',
+  files: '📎 流转文件',
+  specs: '📋 需规归档',
+  ledgers: '🗂️ 工作台账',
+  config: '⚙️ 参数配置（始终显示）'
+};
+
+async function loadNavModules() {
+  const list = document.getElementById('nav-modules-list');
+  if (!list) return;
+  try {
+    const d = await api('/api/nav-modules');
+    const selected = d.data || [];
+    list.innerHTML = Object.keys(NAV_MODULE_LABELS).map(key => {
+      const locked = key === 'config';
+      const checked = locked || selected.includes(key);
+      return `<label class="nav-module-item${locked ? ' disabled' : ''}"><input type="checkbox" data-module="${key}"${checked ? ' checked' : ''}${locked ? ' disabled' : ''}> ${esc(NAV_MODULE_LABELS[key])}</label>`;
+    }).join('');
+    const status = document.getElementById('nav-modules-status');
+    if (status) status.textContent = `已显示 ${selected.length} 个模块`;
+  } catch (e) { /* 读取失败时保留已有界面，不阻断配置页 */ }
+}
+
+async function saveNavModules() {
+  const list = document.getElementById('nav-modules-list');
+  if (!list) return;
+  const modules = Array.from(list.querySelectorAll('input[data-module]:checked')).map(el => el.dataset.module);
+  try {
+    const d = await api('/api/nav-modules', { method: 'PUT', body: JSON.stringify({ modules }) });
+    showToast(d.message || '导航菜单已更新', 'success');
+    applyNavVisibility(d.data);
+    const status = document.getElementById('nav-modules-status');
+    if (status) status.textContent = `已显示 ${d.data.length} 个模块`;
+    if (!isNavModuleVisible(state.currentPage)) navigate(getFirstVisibleModule());
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
 // ---- 加载配置 ----
 function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 const CONFIG_LABELS = { department: '业务部门', version: '上线版本', system: '涉及改造系统', file_type: '流转文件类型', project: '项目', system_alias: '系统别名（格式：标准系统名=别名1,别名2）' };
@@ -58,6 +98,7 @@ async function loadConfig() {
   loadPaths();
   loadTemplateStatus();
   loadBackups();
+  loadNavModules();
 }
 
 function showAddConfig(cat) {

@@ -15,6 +15,7 @@ const state = {
   currentPage: 'orders', orders: [], currentOrder: null, meetings: [],
   editingOrderId: null, editingPointId: null, editingMeetingId: null, editingScheduleId: null,
   orderPage: 1, schedulePage: 1, specPage: 1,
+  ledgerPage: 1, ledgerTab: 'ledger-discipline', editingLedgerId: null,
   meetingFilterOptions: null,
   prefs: null
 };
@@ -45,6 +46,8 @@ window.changePassword = changePassword;
 window.loadDropdowns = loadDropdowns;
 window.loadRelatedDeptCheckboxes = loadRelatedDeptCheckboxes;
 window.onDeptChange = onDeptChange;
+window.loadNavModules = loadNavModules;
+window.saveNavModules = saveNavModules;
 
 // ---- orders.js ----
 window.loadOrders = loadOrders;
@@ -124,6 +127,15 @@ window.scanSpecDocs = scanSpecDocs;
 window.openSpecMatch = openSpecMatch;
 window.confirmSpecMatch = confirmSpecMatch;
 window.deleteSpec = deleteSpec;
+
+// ---- ledgers.js ----
+window.loadLedgers = loadLedgers;
+window.switchLedgerTab = switchLedgerTab;
+window.showCreateLedger = showCreateLedger;
+window.editLedger = editLedger;
+window.deleteLedger = deleteLedger;
+window.resetLedgerFilter = resetLedgerFilter;
+window.exportLedgerExcel = exportLedgerExcel;
 
 // ---- navigation.js ----
 window.navigate = navigate;

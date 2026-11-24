@@ -22,6 +22,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('node:assert/strict');
+const xlsx = require('xlsx');
 
 const ROOT = path.join(__dirname, '..');
 const UPLOADS = path.join(ROOT, 'public', 'uploads');
@@ -1932,6 +1933,218 @@ test('AE. 搜索与遍历', 'walkDir 跳过符号链接且不因单文件异常�
   assert.equal(files.length, 2, '应只返回两个真实文件，符号链接环不应导致递归');
   assert.ok(files.some(f => f.endsWith('a.txt')) && files.some(f => f.endsWith('b.txt')));
   assert.deepEqual(walkDir(path.join(root, 'not-exist')), [], '不存在的目录应返回空数组');
+});
+
+// ==================================================================
+// T. 工作台账
+// ==================================================================
+async function createLedger(category, workName, extra = {}) {
+  const r = await call('/api/ledgers', {
+    method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({
+      category,
+      entry_date: extra.entry_date || '2026-11-01',
+      work_name: workName,
+      issuing_department: extra.issuing_department || '交易中心',
+      work_content: extra.work_content || '检查内容',
+      involved_people: extra.involved_people || '张三',
+      completion_date: extra.completion_date || '',
+      related_materials: extra.related_materials || '',
+      remarks: extra.remarks || ''
+    })
+  });
+  assert.equal(r.json().success, true, '创建台账应成功: ' + r.text);
+  return r.json().data.id;
+}
+
+test('T. 工作台账', '两类台账按 category 隔离，互不串数据', async () => {
+  await createLedger('discipline', '纪检检查A');
+  await createLedger('discipline', '纪检检查B');
+  await createLedger('bm', '保密检查A');
+  const j = (await call('/api/ledgers?category=discipline')).json();
+  const b = (await call('/api/ledgers?category=bm')).json();
+  assert.equal(j.total, 2);
+  assert.equal(b.total, 1);
+  assert.ok(j.data.every(x => x.category === 'discipline'));
+  assert.ok(b.data.every(x => x.category === 'bm'));
+  assert.ok(j.data.some(x => x.work_name === '纪检检查A'));
+  assert.ok(!j.data.some(x => x.work_name === '保密检查A'));
+});
+
+test('T. 工作台账', '关键词 / 下发部门 / 录入日期区间筛选生效', async () => {
+  await createLedger('discipline', '专项督查X', {
+    issuing_department: '清算部', entry_date: '2026-10-05', involved_people: '李四'
+  });
+  const kw = (await call('/api/ledgers?category=discipline&keyword=' + encodeURIComponent('专项督查X'))).json();
+  assert.equal(kw.total, 1);
+  assert.equal(kw.data[0].involved_people, '李四');
+
+  const dept = (await call('/api/ledgers?category=discipline&department=' + encodeURIComponent('清算部'))).json();
+  assert.equal(dept.total, 1);
+  assert.equal(dept.data[0].work_name, '专项督查X');
+
+  const range = (await call('/api/ledgers?category=discipline&date_from=2026-10-01&date_to=2026-10-31')).json();
+  assert.equal(range.total, 1);
+  assert.equal(range.data[0].work_name, '专项督查X');
+
+  const noMatch = (await call('/api/ledgers?category=discipline&date_from=2026-01-01&date_to=2026-01-31')).json();
+  assert.equal(noMatch.total, 0);
+});
+
+test('T. 工作台账', '排序按字段升降序生效，非法 sort 回退默认', async () => {
+  for (const name of ['排序丙', '排序甲', '排序乙']) {
+    await createLedger('bm', name);
+  }
+  const asc = (await call('/api/ledgers?category=bm&sort=work_name&order=asc&pageSize=100')).json();
+  const desc = (await call('/api/ledgers?category=bm&sort=work_name&order=desc&pageSize=100')).json();
+  const names = asc.data.map(x => x.work_name);
+  assert.deepEqual(names, [...names].sort(), '升序应按字段值排列');
+  assert.deepEqual(desc.data.map(x => x.work_name), [...names].reverse(), '降序应为升序的逆序');
+
+  const bad = (await call('/api/ledgers?category=bm&sort=' + encodeURIComponent('id; DROP TABLE work_ledgers'))).json();
+  assert.equal(bad.success, true, '非法排序字段不应报错');
+  assert.ok(db.prepare('SELECT COUNT(*) c FROM work_ledgers').get().c > 0, '表不应被注入破坏');
+});
+
+test('T. 工作台账', '分页 total / totalPages / 每页条数正确', async () => {
+  for (let i = 1; i <= 5; i++) await createLedger('discipline', '分页记录' + i);
+  const p1 = (await call('/api/ledgers?category=discipline&page=1&pageSize=3')).json();
+  const p2 = (await call('/api/ledgers?category=discipline&page=2&pageSize=3')).json();
+  assert.equal(p1.pageSize, 3);
+  assert.equal(p1.data.length, 3);
+  assert.equal(p2.data.length, 3);
+  assert.equal(p1.totalPages, Math.ceil(p1.total / 3));
+  assert.equal(p1.page, 1);
+  assert.equal(p2.page, 2);
+  assert.ok(p1.total > 6, '应有足够数据覆盖多页');
+  assert.equal(new Set([...p1.data, ...p2.data].map(x => x.id)).size, 6, '前两页不应出现重复记录');
+});
+
+test('T. 工作台账', '修改与删除后列表同步，编辑不改变类别', async () => {
+  const id = await createLedger('bm', '待修改台账');
+  const u = await call('/api/ledgers/' + id, {
+    method: 'PUT', headers: jsonHeaders,
+    body: JSON.stringify({
+      entry_date: '2026-11-20', work_name: '已修改台账', issuing_department: '交割储运部',
+      work_content: '新内容', involved_people: '王五', completion_date: '2026-11-21',
+      related_materials: '材料X', remarks: '备注X'
+    })
+  });
+  assert.equal(u.json().success, true);
+  const d = (await call('/api/ledgers/' + id)).json().data;
+  assert.equal(d.work_name, '已修改台账');
+  assert.equal(d.category, 'bm', '编辑不应改变类别');
+  assert.equal(d.entry_date, '2026-11-20');
+  assert.equal(d.related_materials, '材料X');
+
+  const del = await call('/api/ledgers/' + id, { method: 'DELETE' });
+  assert.equal(del.json().success, true);
+  assert.equal((await call('/api/ledgers/' + id)).status, 404);
+});
+
+test('T. 工作台账', '非法 category 与缺失必填字段返回 400', async () => {
+  assert.equal((await call('/api/ledgers?category=hack')).status, 400);
+  assert.equal((await call('/api/ledgers/export?category=hack')).status, 400);
+  const r = await call('/api/ledgers', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ category: 'bm' })
+  });
+  assert.equal(r.status, 400);
+});
+
+test('T. 工作台账', '导出路由注册在参数路由之前', () => {
+  const routes = testApp._router.stack
+    .filter(l => l.route && l.route.path && l.route.path.startsWith('/api/ledgers'))
+    .map(l => l.route.path);
+  const iExport = routes.indexOf('/api/ledgers/export');
+  const iParam = routes.indexOf('/api/ledgers/:id');
+  assert.ok(iExport >= 0 && iParam >= 0 && iExport < iParam, '导出路由必须注册在 :id 之前');
+});
+
+test('T. 工作台账', '导出返回 xlsx 附件且包含筛选结果', async () => {
+  await createLedger('bm', '导出验证台账', {
+    issuing_department: '会员部', work_content: '导出内容', related_materials: '附件名称A'
+  });
+  const r = await fetch(BASE + '/api/ledgers/export?category=bm&keyword=' + encodeURIComponent('导出验证台账'), {
+    headers: { Authorization: AUTH }
+  });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type') || '', /spreadsheet|octet-stream/);
+  assert.match(r.headers.get('content-disposition') || '', /^attachment/);
+  const wb = xlsx.read(Buffer.from(await r.arrayBuffer()), { type: 'buffer' });
+  const rows = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+  assert.equal(rows.length, 1, '按查询结果导出应只含匹配行，且忽略分页');
+  assert.equal(rows[0]['工作名称'], '导出验证台账');
+  assert.equal(rows[0]['下发部门'], '会员部');
+  assert.equal(rows[0]['相关材料'], '附件名称A');
+  assert.equal(rows[0]['类别'], 'BM');
+});
+
+test('T. 工作台账', '前端导航、页面与脚本已接入', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'js', 'app.js'), 'utf8');
+  const nav = fs.readFileSync(path.join(ROOT, 'public', 'js', 'features', 'navigation.js'), 'utf8');
+  assert.ok(html.includes('data-page="ledgers"'), '缺少导航项');
+  assert.ok(html.includes('id="page-ledgers"') && html.includes('id="ledger-modal"'), '缺少页面或弹窗');
+  assert.ok(html.includes('/js/pages/ledgers.js'), '缺少脚本引用');
+  assert.ok(app.includes('window.loadLedgers = loadLedgers'), '缺少全局函数注册');
+  assert.ok(nav.includes("page === 'ledgers'"), 'navigate 未接入台账页');
+});
+
+// ==================================================================
+// AF. 导航菜单配置
+// ==================================================================
+test('AF. 导航菜单配置', '默认只显示五个模块，工作台账默认隐藏', async () => {
+  await call('/api/nav-modules', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ modules: [] })
+  });
+  const r = (await call('/api/nav-modules')).json();
+  assert.equal(r.success, true);
+  assert.deepEqual(r.data, ['orders', 'meetings', 'files', 'specs', 'config']);
+  assert.ok(!r.data.includes('ledgers'), '工作台账默认应隐藏');
+  assert.ok(r.data.includes('config'), '参数配置应始终可见');
+});
+
+test('AF. 导航菜单配置', 'PUT 过滤未知模块、去重并强制保留参数配置', async () => {
+  const r = await call('/api/nav-modules', {
+    method: 'PUT', headers: jsonHeaders,
+    body: JSON.stringify({ modules: ['ledgers', 'bogus', 'orders', 'orders'] })
+  });
+  const d = r.json();
+  assert.equal(d.success, true);
+  assert.deepEqual(d.data, ['orders', 'ledgers', 'config']);
+  const again = (await call('/api/nav-modules')).json();
+  assert.deepEqual(again.data, d.data, '配置应持久化');
+});
+
+test('AF. 导航菜单配置', '空列表回退默认，非数组返回 400', async () => {
+  const empty = await call('/api/nav-modules', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ modules: [] })
+  });
+  assert.deepEqual(empty.json().data, ['orders', 'meetings', 'files', 'specs', 'config']);
+  const bad = await call('/api/nav-modules', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ modules: 'orders' })
+  });
+  assert.equal(bad.status, 400);
+});
+
+test('AF. 导航菜单配置', 'GET /api/config 包含 nav_modules 且不泄露 auth', async () => {
+  const d = (await call('/api/config')).json();
+  assert.ok(Array.isArray(d.data.nav_modules));
+  assert.equal(d.data.auth, undefined);
+});
+
+test('AF. 导航菜单配置', '前端导航项、配置 UI 与显隐逻辑已接入', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'js', 'app.js'), 'utf8');
+  const nav = fs.readFileSync(path.join(ROOT, 'public', 'js', 'features', 'navigation.js'), 'utf8');
+  const cfg = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'config.js'), 'utf8');
+  for (const p of ['orders', 'meetings', 'files', 'specs', 'ledgers', 'config']) {
+    assert.ok(html.includes(`data-page="${p}"`), `缺少导航项 ${p}`);
+  }
+  assert.ok(html.includes('id="config-body-nav"') && html.includes('id="nav-modules-list"'));
+  assert.ok(app.includes('window.saveNavModules = saveNavModules'));
+  assert.ok(nav.includes('function applyNavVisibility') && nav.includes('isNavModuleVisible'));
+  assert.ok(cfg.includes('async function loadNavModules') && cfg.includes('async function saveNavModules'));
 });
 
 // ------------------------------------------------------------------

@@ -64,6 +64,20 @@ function initDatabase(db) {
       FOREIGN KEY (point_id) REFERENCES requirement_points(id),
       UNIQUE(spec_id, point_id)
     );
+    CREATE TABLE IF NOT EXISTS work_ledgers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      entry_date TEXT NOT NULL,
+      work_name TEXT NOT NULL,
+      issuing_department TEXT,
+      work_content TEXT,
+      involved_people TEXT,
+      completion_date TEXT,
+      related_materials TEXT,
+      remarks TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
   `);
 
   // 兼容性迁移：旧数据库可能缺少新增列
@@ -101,6 +115,9 @@ function initDatabase(db) {
     CREATE INDEX IF NOT EXISTS idx_sd_version ON spec_documents(version);
     CREATE INDEX IF NOT EXISTS idx_sd_matched_department ON spec_documents(matched_department);
     CREATE INDEX IF NOT EXISTS idx_sdp_point_id ON spec_document_points(point_id);
+    CREATE INDEX IF NOT EXISTS idx_wl_category ON work_ledgers(category);
+    CREATE INDEX IF NOT EXISTS idx_wl_entry_date ON work_ledgers(entry_date);
+    CREATE INDEX IF NOT EXISTS idx_wl_work_name ON work_ledgers(work_name);
   `);
 }
 

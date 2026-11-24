@@ -140,6 +140,18 @@ module.exports = function (app) {
       res.json({ success: true, data: safe, config_path: config.getConfigPath() });
   }));
 
+  // ---- 导航菜单显示模块（全局配置，参数配置始终保留）----
+  app.get('/api/nav-modules', wrap((req, res) => {
+      res.json({ success: true, data: config.getNavModules() });
+  }));
+
+  app.put('/api/nav-modules', wrap((req, res) => {
+      const modules = req.body && req.body.modules;
+      if (!Array.isArray(modules)) return res.status(400).json({ success: false, message: '模块列表格式无效' });
+      const data = config.setNavModules(modules);
+      res.json({ success: true, data, message: '导航菜单已更新' });
+  }));
+
   // 部门/项目改名影响预览（只读，不写任何数据）
   app.get('/api/config/:category/rename-impact', wrap((req, res) => {
       const { category } = req.params;

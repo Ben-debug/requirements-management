@@ -23,6 +23,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Micr
 .top-nav[data-page="files"] .nav-item.active{border-bottom-color:#fa8c16}
 .top-nav[data-page="config"] .nav-item.active{border-bottom-color:#722ed1}
 .top-nav[data-page="specs"] .nav-item.active{border-bottom-color:#13c2c2}
+.top-nav[data-page="ledgers"] .nav-item.active{border-bottom-color:#faad14}
 
 /* 子Tab跟随主页面颜色 */
 #page-meetings .tab-item.active{color:#52c41a;border-bottom-color:#52c41a}
@@ -656,6 +657,8 @@ a.file-link:hover, a.order-link:hover {
 .query-row .btn-icon{opacity:1}
 .query-row .badge{font-size:11px}
 .query-row .file-link{font-size:12px}
+/* 工作台账列表：长文本省略，悬停 title 查看完整内容 */
+.ledger-cell{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 手工匹配成功后短暂高亮该文档节点 */
 .spec-just-updated{background:#f6ffed!important;box-shadow:inset 0 0 0 1px #b7eb8f}
 /* 业务参数拖拽排序 */
@@ -663,3 +666,7 @@ a.file-link:hover, a.order-link:hover {
 .config-item.drag-over{box-shadow:inset 0 2px 0 #1890ff;background:#e6f7ff}
 .config-item.dragging{opacity:.45}
 .config-drag-handle{color:#bbb;font-size:14px;user-select:none;margin-right:8px}
+/* 导航菜单模块勾选卡片 */
+.nav-module-item{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid #d9d9d9;border-radius:6px;cursor:pointer;font-size:13px;user-select:none}
+.nav-module-item:hover{border-color:#1890ff}
+.nav-module-item.disabled{background:#fafafa;color:#999;cursor:not-allowed;border-color:#e8e8e8}

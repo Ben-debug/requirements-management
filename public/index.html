@@ -17,6 +17,7 @@
     <div class="nav-item" data-page="meetings" onclick="navigate('meetings')">📅 排期管理</div>
     <div class="nav-item" data-page="files" onclick="navigate('files')">📎 流转文件</div>
     <div class="nav-item" data-page="specs" onclick="navigate('specs')">📋 需规归档</div>
+    <div class="nav-item" data-page="ledgers" onclick="navigate('ledgers')">🗂️ 工作台账</div>
     <div class="nav-item" data-page="config" onclick="navigate('config')">⚙️ 参数配置</div>
   </div>
   <div class="nav-tools">
@@ -295,6 +296,68 @@
   </div>
 </div>
 
+<!-- Work Ledger Page -->
+<div id="page-ledgers" class="page-content" style="display:none">
+  <div class="page-header"><h2>🗂️ 工作台账</h2><p>纪检、BM 两类工作台账分开管理</p></div>
+  <div class="tab-bar">
+    <div class="tab-item active" data-tab="ledger-discipline" onclick="switchLedgerTab('ledger-discipline')">纪检台账</div>
+    <div class="tab-item" data-tab="ledger-bm" onclick="switchLedgerTab('ledger-bm')">BM台账</div>
+  </div>
+  <div class="toolbar" style="justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:12px">
+      <strong id="ledger-tab-title" style="font-size:15px">纪检台账</strong>
+      <span id="ledger-result-info" style="font-size:13px;color:#999"></span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="showCreateLedger()">＋ 新建</button>
+      <button class="btn btn-export" onclick="exportLedgerExcel()">📤 导出</button>
+    </div>
+  </div>
+  <div class="filter-bar">
+    <div class="filter-row">
+      <label class="filter-field">关键词
+        <input type="text" id="ledger-keyword" placeholder="名称/部门/人员/内容" style="width:180px" onkeydown="if(event.key==='Enter')loadLedgers(1)">
+      </label>
+      <label class="filter-field">下发部门
+        <input list="ledger-departments" id="ledger-department" placeholder="全部部门" style="width:130px">
+      </label>
+      <label class="filter-field">录入日期
+        <span class="filter-range">
+          <input type="date" id="ledger-date-from"> ~ <input type="date" id="ledger-date-to">
+        </span>
+      </label>
+      <span class="filter-actions">
+        <button class="btn btn-primary" onclick="loadLedgers(1)">🔍 查询</button>
+        <button class="btn" onclick="resetLedgerFilter()">↻ 重置</button>
+      </span>
+    </div>
+    <div class="filter-row">
+      <label class="filter-field">排序
+        <select id="ledger-sort">
+          <option value="entry_date">录入日期</option>
+          <option value="work_name">工作名称</option>
+          <option value="issuing_department">下发部门</option>
+          <option value="completion_date">完成日期</option>
+          <option value="created_at">创建时间</option>
+        </select>
+      </label>
+      <label class="filter-field">顺序
+        <select id="ledger-order">
+          <option value="desc">降序</option>
+          <option value="asc">升序</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <datalist id="ledger-departments"></datalist>
+  <div class="table-container">
+    <table id="ledgers-table"><thead><tr>
+      <th>录入日期</th><th>工作名称</th><th>下发部门</th><th>工作内容</th><th>涉及人员</th><th>完成日期</th><th>相关材料</th><th>备注</th><th>操作</th>
+    </tr></thead><tbody id="ledger-tbody"><tr><td colspan="9"><div class="loading">加载中...</div></td></tr></tbody></table>
+    <div id="ledgers-pagination" class="pagination"></div>
+  </div>
+</div>
+
 <!-- Config Page -->
 <div id="page-config" class="page-content" style="display:none">
   <div class="page-header"><h2>⚙️ 参数配置</h2><p>管理各类参数的可选值，折叠式布局</p></div>
@@ -369,6 +432,17 @@
   </div>
   <div id="tab-config-system" class="tab-content" style="display:none">
     <div class="config-accordion">
+    <div class="config-group">
+      <div class="config-group-header" onclick="toggleConfigGroup(this)">
+        <span class="title">🧭 导航菜单</span>
+        <div><span style="font-size:12px;color:#999;margin-right:12px" id="nav-modules-status"></span><span class="arrow">▼</span></div>
+      </div>
+      <div class="config-group-body" id="config-body-nav">
+        <p style="font-size:13px;color:#999;margin:0 0 12px;padding:8px 12px;background:#fffbe6;border:1px solid #ffe58f;border-radius:6px">勾选需要在顶部导航栏显示的模块，保存后立即生效，配置全局共用。<b>参数配置</b>始终保留，避免隐藏后无法从界面改回。</p>
+        <div id="nav-modules-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+        <button class="btn btn-sm btn-primary" onclick="saveNavModules()" title="保存导航菜单显示设置，立即生效">💾 保存设置</button>
+      </div>
+    </div>
     <div class="config-group">
       <div class="config-group-header" onclick="toggleConfigGroup(this)">
         <span class="title">📂 存储路径设置</span>
@@ -729,28 +803,50 @@
   </div>
 </div></div>
 
+<!-- Work Ledger Modal -->
+<div id="ledger-modal" class="modal-overlay"><div class="modal">
+  <div class="modal-header"><h3 id="ledger-modal-title">新建台账</h3><button class="modal-close" onclick="closeModal('ledger-modal')">×</button></div>
+  <form id="ledger-form"><div class="modal-body">
+    <div class="form-row">
+      <div class="form-group"><label>录入日期 <span class="required">*</span></label><input type="date" id="ledger_entry_date" name="entry_date" class="form-control" required></div>
+      <div class="form-group"><label>工作名称 <span class="required">*</span></label><input type="text" id="ledger_work_name" name="work_name" class="form-control" required></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>下发部门</label><input list="ledger-departments" id="ledger_issuing_department" name="issuing_department" class="form-control"></div>
+      <div class="form-group"><label>涉及人员</label><input type="text" id="ledger_involved_people" name="involved_people" class="form-control"></div>
+    </div>
+    <div class="form-group"><label>工作内容</label><textarea id="ledger_work_content" name="work_content" class="form-control" rows="3"></textarea></div>
+    <div class="form-group"><label>完成日期</label><input type="date" id="ledger_completion_date" name="completion_date" class="form-control"></div>
+    <div class="form-group"><label>相关材料</label><input type="text" id="ledger_related_materials" name="related_materials" class="form-control" placeholder="材料名称、编号或存放位置"></div>
+    <div class="form-group"><label>备注</label><textarea id="ledger_remarks" name="remarks" class="form-control" rows="2"></textarea></div>
+    <input type="hidden" id="ledger_category" name="category">
+    <input type="hidden" id="ledger-id">
+  </div><div class="modal-footer"><button type="button" class="btn" onclick="closeModal('ledger-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
+</div></div>
+
 <footer class="app-footer">
   <div class="footer-content">
-    <span>我的工作平台 v2.3.5</span>
+    <span>我的工作平台 v2.3.6</span>
     <span>创作者：Yu by AI</span>
     <span>发布日期：2026-11-24</span>
   </div>
   <div class="footer-note">🔒 本地部署 · 数据仅存本机 · 不联网</div>
   <div class="security-notice">严禁处理涉密信息</div>
 </footer>
-<script src="/js/api.js?v=2.3.5"></script>
-<script src="/js/components.js?v=2.3.5"></script>
-<script src="/js/features/renderers.js?v=2.3.5"></script>
-<script src="/js/features/preferences.js?v=2.3.5"></script>
-<script src="/js/features/navigation.js?v=2.3.5"></script>
-<script src="/js/pages/config.js?v=2.3.5"></script>
-<script src="/js/pages/orders.js?v=2.3.5"></script>
-<script src="/js/pages/meetings.js?v=2.3.5"></script>
-<script src="/js/pages/schedules.js?v=2.3.5"></script>
-<script src="/js/pages/files.js?v=2.3.5"></script>
-<script src="/js/pages/specs.js?v=2.3.5"></script>
-<script src="/js/features/search.js?v=2.3.5"></script>
-<script src="/js/features/import-export.js?v=2.3.5"></script>
-<script src="/js/app.js?v=2.3.5"></script>
+<script src="/js/api.js?v=2.3.6"></script>
+<script src="/js/components.js?v=2.3.6"></script>
+<script src="/js/features/renderers.js?v=2.3.6"></script>
+<script src="/js/features/preferences.js?v=2.3.6"></script>
+<script src="/js/features/navigation.js?v=2.3.6"></script>
+<script src="/js/pages/config.js?v=2.3.6"></script>
+<script src="/js/pages/orders.js?v=2.3.6"></script>
+<script src="/js/pages/meetings.js?v=2.3.6"></script>
+<script src="/js/pages/schedules.js?v=2.3.6"></script>
+<script src="/js/pages/files.js?v=2.3.6"></script>
+<script src="/js/pages/specs.js?v=2.3.6"></script>
+<script src="/js/pages/ledgers.js?v=2.3.6"></script>
+<script src="/js/features/search.js?v=2.3.6"></script>
+<script src="/js/features/import-export.js?v=2.3.6"></script>
+<script src="/js/app.js?v=2.3.6"></script>
 </body>
 </html>

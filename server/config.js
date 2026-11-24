@@ -13,8 +13,23 @@ const defaults = {
   department_alias: [],
   project_alias: [],
   version_alias: [],
+  // 导航菜单中默认显示的模块；工作台账前期不用，默认不在导航栏展示
+  nav_modules: ['orders', 'meetings', 'files', 'specs', 'config'],
   paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '', service_order_dir: '', spec_docs_dir: '', backup_dir: '' }
 };
+
+// 导航模块：与 public/index.html 中 .nav-item[data-page] 一一对应
+const NAV_MODULES = ['orders', 'meetings', 'files', 'specs', 'ledgers', 'config'];
+const NAV_ALWAYS_VISIBLE = 'config';
+
+/** 规范化导航模块列表：过滤未知项、去重、固定顺序、强制包含参数配置 */
+function normalizeNavModules(list) {
+  if (!Array.isArray(list) || list.length === 0) return [...defaults.nav_modules];
+  const picked = new Set(list.filter(x => NAV_MODULES.includes(x)));
+  picked.add(NAV_ALWAYS_VISIBLE);
+  const out = NAV_MODULES.filter(x => picked.has(x));
+  return out.length ? out : [...defaults.nav_modules];
+}
 
 // 默认配置目录：项目 data/ 或 exe 同级 data/
 let configDir;
@@ -72,6 +87,15 @@ function getAll() { return load(); }
 function getCategory(cat) {
   const data = load();
   return data[cat] || [];
+}
+
+function getNavModules() { return normalizeNavModules(getCategory('nav_modules')); }
+
+function setNavModules(list) {
+  const data = load();
+  data.nav_modules = normalizeNavModules(list);
+  save();
+  return data.nav_modules.slice();
 }
 
 function addItem(cat, label) {
@@ -254,4 +278,4 @@ function verifyPassword(plain, stored) {
   } catch (e) { return false; }
 }
 
-module.exports = { getAll, getCategory, addItem, deleteItem, updateItem, isEditable, reorderCategory, getAliasEntries, getAliases, expandNames, snapshot, restore, getPath, setPath, load, setConfigDir, getConfigPath, getAuthPassword, setAuthPassword, verifyPassword, isLegacyPassword };
+module.exports = { getAll, getCategory, addItem, deleteItem, updateItem, isEditable, reorderCategory, getAliasEntries, getAliases, expandNames, snapshot, restore, getPath, setPath, load, setConfigDir, getConfigPath, getAuthPassword, setAuthPassword, verifyPassword, isLegacyPassword, getNavModules, setNavModules, normalizeNavModules };

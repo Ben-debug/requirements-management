@@ -5,22 +5,15 @@
 const { getDatabase } = require('../database');
 const path = require('path');
 const fs = require('fs');
-const config = require('../config');
 const { walkDir, paginate } = require('../utils');
+const { wrap } = require('../middleware/error-handler');
+const { getMeetingFileDir } = require('../paths');
 
 module.exports = function (app) {
 
-  const ROOT_DIR = path.join(__dirname, '..', '..');
-  const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
-
-  function getMeetingFileDir() {
-    const custom = config.getPath('meeting_files_dir');
-    return custom || path.join(DATA_DIR, 'public', 'uploads', 'meeting_files');
-  }
 
   // ---- 会议列表（支持筛选 + 分页；不传分页参数时仍返回全量，兼容各页面下拉）----
-  app.get('/api/meetings', (req, res) => {
-    try {
+  app.get('/api/meetings', wrap((req, res) => {
       const db = getDatabase();
       const { keyword, ccb_only, date_from, date_to, page, pageSize } = req.query;
       const where = [], params = [];
@@ -61,50 +54,40 @@ module.exports = function (app) {
       const p = paginate(baseSql, params, parseInt(page) || 1, parseInt(pageSize) || 10);
       res.json({ success: true, data: withSummary(p.items),
         total: p.total, page: p.page, pageSize: p.pageSize, totalPages: p.totalPages });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 会议详情（含排期） ----
-  app.get('/api/meetings/:id', (req, res) => {
-    try {
+  app.get('/api/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
       const m = db.prepare('SELECT * FROM ccb_meetings WHERE id=?').get(req.params.id);
       if (!m) return res.status(404).json({ success: false });
       const s = db.prepare(`SELECT cs.*, ro.order_number, ro.name as order_name, rp.point_number, rp.sub_batch, rp.description as point_description FROM ccb_schedules cs JOIN requirement_orders ro ON cs.order_id=ro.id JOIN requirement_points rp ON cs.point_id=rp.id WHERE cs.meeting_id=? ORDER BY SUBSTR(ro.order_number, 1, 1), CAST(SUBSTR(ro.order_number, 2) AS INTEGER), rp.point_number`).all(req.params.id);
       res.json({ success: true, data: { ...m, schedules: s } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 创建会议 ----
-  app.post('/api/meetings', (req, res) => {
-    try {
+  app.post('/api/meetings', wrap((req, res) => {
       const db = getDatabase();
       const r = db.prepare('INSERT INTO ccb_meetings (meeting_name,meeting_date,notes) VALUES (?,?,?)').run(req.body.meeting_name, req.body.meeting_date, req.body.notes);
       res.json({ success: true, data: { id: r.lastInsertRowid } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 更新会议 ----
-  app.put('/api/meetings/:id', (req, res) => {
-    try {
+  app.put('/api/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
       db.prepare('UPDATE ccb_meetings SET meeting_name=?, meeting_date=?, notes=? WHERE id=?').run(req.body.meeting_name, req.body.meeting_date, req.body.notes, req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 删除会议 ----
-  app.delete('/api/meetings/:id', (req, res) => {
-    try {
+  app.delete('/api/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
       db.prepare('DELETE FROM ccb_meetings WHERE id=?').run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 扫描会议纪要目录 ----
-  app.get('/api/meetings/:id/scan-files', (req, res) => {
-    try {
+  app.get('/api/meetings/:id/scan-files', wrap((req, res) => {
       const db = getDatabase();
       const meetingId = parseInt(req.params.id);
       const meeting = db.prepare('SELECT id, meeting_name, file_name, file_path FROM ccb_meetings WHERE id=?').get(meetingId);
@@ -127,7 +110,6 @@ module.exports = function (app) {
         linked = best;
       }
       res.json({ success: true, data: discovered, linked, count: discovered.length });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };

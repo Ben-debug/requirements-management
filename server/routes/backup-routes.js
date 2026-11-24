@@ -7,14 +7,28 @@ const path = require('path');
 const JSZip = require('jszip');
 const config = require('../config');
 const { getDatabase } = require('../database');
+const { wrap } = require('../middleware/error-handler');
+const { getBackupDir } = require('../paths');
 
 const BACKUP_NAME = /^backup-\d{8}-\d{6}$/;
+const APP_VERSION_FALLBACK = '2.3.4';
+
+// pkg 打包后 __dirname 是虚拟快照路径，require('../../package.json') 可能失败；
+// 备份本身已成功，不能再因为读版本号而报「备份失败」。
+function getAppVersion() {
+  try {
+    return require('../../package.json').version || APP_VERSION_FALLBACK;
+  } catch (e) {
+    try {
+      const p = path.join(process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..', '..'), 'package.json');
+      return JSON.parse(fs.readFileSync(p, 'utf8')).version || APP_VERSION_FALLBACK;
+    } catch (e2) {
+      return APP_VERSION_FALLBACK;
+    }
+  }
+}
 
 module.exports = function (app) {
-
-  function getBackupDir() {
-    return path.join(path.dirname(config.getConfigPath()), 'backups');
-  }
 
   function stampName() {
     const n = new Date();
@@ -75,7 +89,7 @@ module.exports = function (app) {
       const manifest = {
         name,
         created_at: new Date().toISOString(),
-        app_version: require('../../package.json').version,
+        app_version: getAppVersion(),
         include_uploads: includeUploads,
         size_bytes: dirSize(dir)
       };
@@ -87,8 +101,7 @@ module.exports = function (app) {
   });
 
   // ---- 备份列表 ----
-  app.get('/api/backup/list', (req, res) => {
-    try {
+  app.get('/api/backup/list', wrap((req, res) => {
       const root = getBackupDir();
       if (!fs.existsSync(root)) return res.json({ success: true, data: [] });
       const list = fs.readdirSync(root, { withFileTypes: true })
@@ -98,24 +111,20 @@ module.exports = function (app) {
         })
         .sort((a, b) => String(b.name).localeCompare(String(a.name)));
       res.json({ success: true, data: list });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 删除备份 ----
-  app.delete('/api/backup/:name', (req, res) => {
-    try {
+  app.delete('/api/backup/:name', wrap((req, res) => {
       const name = req.params.name;
       if (!BACKUP_NAME.test(name)) return res.status(400).json({ success: false, message: '备份名称无效' });
       const dir = path.join(getBackupDir(), name);
       if (!fs.existsSync(dir)) return res.status(404).json({ success: false, message: '备份不存在' });
       fs.rmSync(dir, { recursive: true, force: true });
       res.json({ success: true, message: '备份已删除' });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 下载备份（zip） ----
-  app.get('/api/backup/:name/download', async (req, res) => {
-    try {
+  app.get('/api/backup/:name/download', wrap(async (req, res) => {
       const name = req.params.name;
       if (!BACKUP_NAME.test(name)) return res.status(400).json({ success: false, message: '备份名称无效' });
       const dir = path.join(getBackupDir(), name);
@@ -135,7 +144,6 @@ module.exports = function (app) {
       res.set('Content-Type', 'application/zip');
       res.set('Content-Disposition', `attachment; filename*="UTF-8''${encodeURIComponent(name + '.zip')}"`);
       res.send(buf);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };

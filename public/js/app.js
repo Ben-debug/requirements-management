@@ -15,7 +15,8 @@ const state = {
   currentPage: 'orders', orders: [], currentOrder: null, meetings: [],
   editingOrderId: null, editingPointId: null, editingMeetingId: null, editingScheduleId: null,
   orderPage: 1, schedulePage: 1, specPage: 1,
-  meetingFilterOptions: null
+  meetingFilterOptions: null,
+  prefs: null
 };
 
 // ============================================================

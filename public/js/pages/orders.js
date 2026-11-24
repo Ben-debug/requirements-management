@@ -5,7 +5,8 @@
 
 // ---- 筛选参数 ----
 function getFilterParams() {
-  const pageSize = parseInt(document.getElementById('pagination-page-size')?.value) || 10;
+  // 分页下拉在 totalPages<=1 时不会渲染，此时回退到偏好值（含 URL 显式值）
+  const pageSize = parseInt(document.getElementById('pagination-page-size')?.value) || resolvePreference('orders', 'pageSize');
   const params = { page: state.orderPage, pageSize: pageSize > 0 ? pageSize : 10 };
   const dept = document.getElementById('filter-department')?.value;
   if (dept) params.department = dept;
@@ -19,11 +20,11 @@ function getFilterParams() {
   if (isched) params.is_scheduled = isched;
   const meeting = document.getElementById('filter-ccb-meeting')?.value;
   if (meeting) params.meeting_name = meeting;
-  const sort = document.getElementById('filter-sort')?.value;
+  const sort = document.getElementById('filter-sort')?.value || resolvePreference('orders', 'sort');
   if (sort) params.sort = sort;
-  const order = document.getElementById('filter-order')?.value;
+  const order = document.getElementById('filter-order')?.value || resolvePreference('orders', 'order');
   if (order) params.order = order;
-  const group_by = document.getElementById('filter-group-orders')?.value;
+  const group_by = document.getElementById('filter-group-orders')?.value || resolvePreference('orders', 'group_by');
   if (group_by) params.group_by = group_by;
   return params;
 }
@@ -51,6 +52,7 @@ async function loadOrders() {
     if (!r.items.length) {
       tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的需求单</p></div></td></tr>';
       renderPagination('orders-pagination', r, 'gotoOrderPage', 'pagination-page-size');
+      bindOrderPageSizeSave();
       return;
     }
 
@@ -94,6 +96,7 @@ async function loadOrders() {
     } else {
       tbody.innerHTML = r.items.map(o => orderRow(o)).join('');
       renderPagination('orders-pagination', r, 'gotoOrderPage', 'pagination-page-size');
+      bindOrderPageSizeSave();
     }
 
     if (r.filters?.departments) {
@@ -111,7 +114,13 @@ async function loadOrders() {
 }
 
 function applyFilters() { state.orderPage = 1; loadOrders(); }
-function onFilterChange() { state.orderPage = 1; loadOrders(); }
+function onFilterChange() {
+  savePreference('orders', 'sort', document.getElementById('filter-sort')?.value);
+  savePreference('orders', 'order', document.getElementById('filter-order')?.value);
+  savePreference('orders', 'group_by', document.getElementById('filter-group-orders')?.value);
+  state.orderPage = 1;
+  loadOrders();
+}
 function resetFilters() {
   document.getElementById('filter-department').value = '';
   document.getElementById('filter-date-from').value = '';
@@ -122,8 +131,18 @@ function resetFilters() {
   document.getElementById('filter-group-orders').value = 'none';
   document.getElementById('filter-sort').value = 'order_number';
   document.getElementById('filter-order').value = 'asc';
+  savePreference('orders', 'sort', 'order_number');
+  savePreference('orders', 'order', 'asc');
+  savePreference('orders', 'group_by', 'none');
   state.orderPage = 1;
   loadOrders();
+}
+
+/** 分页下拉是动态生成的，每次渲染后补一个保存偏好的监听 */
+function bindOrderPageSizeSave() {
+  document.getElementById('orders-pagination')?.querySelector('select')?.addEventListener('change', e => {
+    savePreference('orders', 'pageSize', e.target.value);
+  });
 }
 
 function gotoOrderPage(p) { state.orderPage = p; loadOrders(); }
@@ -371,24 +390,35 @@ function renderDetailPoints(points) {
 }
 
 function renderPointItem(p, oid) {
-  const has = p.schedule_system || p.schedule_id;
-  const systems = p.schedule_system ? p.schedule_system.split(',').filter(Boolean) : [];
+  // 兼容旧数据：无 schedules 数组时按兼容字段还原为单条排期
+  const all = (p.schedules && p.schedules.length)
+    ? p.schedules
+    : (p.schedule_id ? [{ id: p.schedule_id, system: p.schedule_system, version: p.schedule_version, meeting_name: p.meeting_name, meeting_date: p.meeting_date, is_project: p.is_project, project_name: p.project_name }] : []);
+  const has = all.length > 0;
   const tag = p.sub_batch ? `<span style="display:inline-block;font-size:11px;background:#e6f7ff;color:#1890ff;padding:0 6px;border-radius:3px;margin-left:6px;font-weight:400">子单 ${p.sub_batch}</span>` : '';
   const descId = `pd-${p.id}`;
   const isLong = p.description && p.description.length > 80;
+  const schedHtml = has
+    ? all.map((s, i) => {
+        const systems = (s.system || '').split(',').filter(Boolean);
+        const label = all.length > 1 ? `<span style="color:#999">[${i + 1}/${all.length}]</span> ` : '';
+        return `<div class="point-meta">${label}<span style="color:#52c41a">✅ ${systems.map(x => esc(x.trim())).join(', ')} | ${esc(s.version || '')}</span>`
+          + (s.meeting_name ? ` | 📅 ${esc(s.meeting_name)} (${esc(s.meeting_date || '')})` : '')
+          + (s.is_project ? ` | <span style="color:#fa8c16">📋 项目：${esc(s.project_name || '未指定')}</span>` : '')
+          + `</div>`;
+      }).join('')
+    : '<div class="point-meta"><span style="color:#fa8c16">⏳ 待排期</span></div>';
   return `<div class="point-item">
     <div class="point-info">
       <div class="point-number">${esc(p.point_number)}${tag}</div>
       <div id="${descId}" class="point-desc ${isLong ? 'point-desc-clamped' : ''}" onclick="${isLong ? `togglePointDesc('${descId}')` : ''}">${esc(p.description).replace(/\n/g, '<br>')}</div>
       ${isLong ? `<span class="desc-toggle-btn" onclick="togglePointDesc('${descId}')">展开全文 ▼</span>` : ''}
-      <div class="point-meta">${has ? `<span style="color:#52c41a">✅ ${systems.map(s => esc(s.trim())).join(', ')} | ${esc(p.schedule_version)}</span>` : '<span style="color:#fa8c16">⏳ 待排期</span>'}
-      ${p.meeting_name ? ` | 📅 ${esc(p.meeting_name)} (${p.meeting_date})` : ''}
-      ${p.is_project ? ` | <span style="color:#fa8c16">📋 项目：${esc(p.project_name || '未指定')}</span>` : ''}</div>
+      ${schedHtml}
     </div>
     <div class="point-actions">
       <button class="btn btn-sm" onclick="editPoint(${p.id},${oid})">编辑</button>
       ${!has ? `<button class="btn btn-sm btn-success" onclick="showScheduleModal(${p.id},${oid})">排期</button>`
-        : `<button class="btn btn-sm" onclick="openEditScheduleModal(${p.schedule_id},${oid})">修改排期</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromDetail(${p.schedule_id})">移除排期</button>`}
+        : all.map(s => `<button class="btn btn-sm" onclick="openEditScheduleModal(${s.id},${oid})">修改排期</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromDetail(${s.id})">移除排期</button>`).join('')}
       <button class="btn btn-sm btn-danger" onclick="deletePoint(${p.id})">删除</button>
     </div>
   </div>`;

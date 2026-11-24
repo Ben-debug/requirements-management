@@ -5,24 +5,18 @@
 const { getDatabase } = require('../database');
 const config = require('../config');
 const { walkDirAsync, paginate, sendFileInline, sendFileMissing, handleFileOpen } = require('../utils');
+const { wrap } = require('../middleware/error-handler');
 const path = require('path');
 const fs = require('fs');
+const { getSpecDocDir } = require('../paths');
 
 module.exports = function (app) {
 
-  const ROOT_DIR = path.join(__dirname, '..', '..');
-  const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
-
-  function getSpecDocDir() {
-    const custom = config.getPath('spec_docs_dir');
-    return custom || path.join(DATA_DIR, 'public', 'uploads', 'spec_docs');
-  }
 
   // ============================================================
   // 系统+需求点映射（用于需规匹配）
   // ============================================================
-  app.get('/api/specs/systems', (req, res) => {
-    try {
+  app.get('/api/specs/systems', wrap((req, res) => {
       const db = getDatabase();
       const { version, department } = req.query;
       if (!version) return res.status(400).json({ success: false, message: '请指定版本' });
@@ -49,14 +43,12 @@ module.exports = function (app) {
         }
       }
       res.json({ success: true, data: { systems: realSystems(config.getCategory('system')), systemGroups } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ============================================================
   // 树状数据（版本 → 归档类别 → 文档 → 系统 → 需求单 → 需求点）
   // ============================================================
-  app.get('/api/specs/tree', (req, res) => {
-    try {
+  app.get('/api/specs/tree', wrap((req, res) => {
       const db = getDatabase();
       const { version } = req.query;
       const params = [];
@@ -161,13 +153,11 @@ module.exports = function (app) {
       }
       const tree = sorted.filter(Boolean).concat(unsorted);
       res.json({ success: true, data: tree, filters: { versions: allVersions } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ============================================================
   // ============================================================
-  app.get('/api/specs/query', (req, res) => {
-    try {
+  app.get('/api/specs/query', wrap((req, res) => {
       const db = getDatabase();
       const { version, system, department, keyword, project_name, group_by, page = 1, pageSize = 20 } = req.query;
 
@@ -253,8 +243,7 @@ module.exports = function (app) {
       const usedProjects = db.prepare("SELECT DISTINCT project_name FROM ccb_schedules WHERE is_project=1 AND project_name IS NOT NULL AND project_name!='' ORDER BY project_name").all().map(r => r.project_name);
       const projects = [...new Set([...config.getCategory('project'), ...usedProjects])];
       res.json({ success: true, ...result, grouped, filters: { versions, systems, departments, projects } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // 扫描允许的文件类型：Word + Office 全套 + PDF
   const ALLOWED_EXTS = new Set([
@@ -340,8 +329,7 @@ module.exports = function (app) {
 
   // 扫描目录（每个文件归入三类之一，已有记录按新规则覆盖）
   // ============================================================
-  app.post('/api/specs/scan', async (req, res) => {
-    try {
+  app.post('/api/specs/scan', wrap(async (req, res) => {
       const db = getDatabase();
       const { version } = req.body;
       if (!version) return res.status(400).json({ success: false, message: '请选择版本' });
@@ -452,61 +440,51 @@ module.exports = function (app) {
       res.json({ success: true, data: discovered, count: counts.word_version + counts.signed_scan,
         meeting_count: counts.meeting_minutes, counts, stale_count: staleCount,
         skipped, skipped_count: skipped.length, message: msg });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ============================================================
   // 评审会议纪要 — 删除（保留，树状图中可删除）
   // ============================================================
-  app.delete('/api/specs/meetings/:id', (req, res) => {
-    try {
+  app.delete('/api/specs/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
       const m = db.prepare("SELECT * FROM spec_documents WHERE id=? AND doc_type='meeting_minutes'").get(req.params.id);
       if (!m) return res.status(404).json({ success: false, message: '会议纪要不存在' });
       if (m.file_path && fs.existsSync(m.file_path)) fs.unlinkSync(m.file_path);
       db.prepare('DELETE FROM spec_documents WHERE id=?').run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ============================================================
   // 需规文档下载 / 在线预览
   // ============================================================
-  app.get('/api/specs/:id/download', (req, res) => {
-    try {
+  app.get('/api/specs/:id/download', wrap((req, res) => {
       const db = getDatabase();
       const spec = db.prepare("SELECT * FROM spec_documents WHERE id=? AND doc_type='spec_doc'").get(req.params.id);
       if (!spec) return res.status(404).json({ success: false, message: '需规文档不存在' });
       if (!spec.file_path || !fs.existsSync(spec.file_path)) return sendFileMissing(res, spec.file_name, spec.file_path);
       res.download(spec.file_path, spec.file_name);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.get('/api/specs/:id/preview', (req, res) => {
-    try {
+  app.get('/api/specs/:id/preview', wrap((req, res) => {
       const db = getDatabase();
       const spec = db.prepare("SELECT * FROM spec_documents WHERE id=? AND doc_type='spec_doc'").get(req.params.id);
       if (!spec) return res.status(404).json({ success: false, message: '需规文档不存在' });
       if (!spec.file_path || !fs.existsSync(spec.file_path)) return sendFileMissing(res, spec.file_name, spec.file_path);
       sendFileInline(res, spec.file_path, spec.file_name);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 需规文档智能打开 ----
-  app.get('/api/specs/:id/open', (req, res) => {
-    try {
+  app.get('/api/specs/:id/open', wrap((req, res) => {
       const db = getDatabase();
       const spec = db.prepare("SELECT * FROM spec_documents WHERE id=? AND doc_type='spec_doc'").get(req.params.id);
       if (!spec) return res.status(404).json({ success: false, message: '需规文档不存在' });
       handleFileOpen(req, res, spec.file_path, spec.file_name);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ============================================================
   // 需规文档详情 / 匹配 / 删除
   // ============================================================
-  app.get('/api/specs/:id', (req, res) => {
-    try {
+  app.get('/api/specs/:id', wrap((req, res) => {
       const db = getDatabase();
       const spec = db.prepare('SELECT * FROM spec_documents WHERE id=?').get(req.params.id);
       if (!spec) return res.status(404).json({ success: false, message: '需规文档不存在' });
@@ -523,11 +501,9 @@ module.exports = function (app) {
         ORDER BY ro.order_number, rp.point_number
       `).all(req.params.id);
       res.json({ success: true, data: { ...spec, points } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.put('/api/specs/:id/match', (req, res) => {
-    try {
+  app.put('/api/specs/:id/match', wrap((req, res) => {
       const db = getDatabase();
       const systems = realSystems(Array.isArray(req.body.systems) ? req.body.systems : []);
       if (!systems.length) return res.status(400).json({ success: false, message: '请至少选择一个真实系统，不允许无系统匹配' });
@@ -566,15 +542,12 @@ module.exports = function (app) {
       const deptNote = splitNames(spec.matched_department).length
         ? `（已按文档名中的部门「${spec.matched_department}」限定为该部门提出的需求单）` : '';
       res.json({ success: true, message: '手动匹配已更新，已关联 ' + pointIds.size + ' 个需求点' + deptNote + '（后续扫描将保留此匹配）' });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.delete('/api/specs/:id', (req, res) => {
-    try {
+  app.delete('/api/specs/:id', wrap((req, res) => {
       const db = getDatabase();
       db.prepare("DELETE FROM spec_documents WHERE id=? AND doc_type='spec_doc'").run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };

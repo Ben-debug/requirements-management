@@ -4,28 +4,17 @@
  */
 const { getDatabase } = require('../database');
 const config = require('../config');
-const { normalizeDate, paginate, walkDir } = require('../utils');
+const { normalizeDate, paginate, walkDirAsync } = require('../utils');
+const { wrap } = require('../middleware/error-handler');
 const path = require('path');
 const fs = require('fs');
+const { getFlowFileDir, getServiceOrderDir } = require('../paths');
 
 module.exports = function (app) {
 
-  // ---- 目录路径辅助 ----
-  const ROOT_DIR = path.join(__dirname, '..', '..');
-  const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
-
-  function getFlowFileDir() {
-    const custom = config.getPath('flow_files_dir');
-    return custom || path.join(DATA_DIR, 'public', 'uploads', 'flow_files');
-  }
-  function getServiceOrderDir() {
-    const custom = config.getPath('service_order_dir');
-    return custom || path.join(DATA_DIR, 'public', 'uploads', 'service_orders');
-  }
 
   // ---- 需求单列表（筛选 + 分页 + 分组 + 排期摘要） ----
-  app.get('/api/orders', (req, res) => {
-    try {
+  app.get('/api/orders', wrap((req, res) => {
       const db = getDatabase();
       const { page = 1, pageSize = 10, department, keyword, date_from, date_to, is_project, is_scheduled, meeting_name, sort = 'created_at', order = 'desc', group_by } = req.query;
       let sql = 'SELECT id, order_number, name, department, related_departments, proposer, propose_date, business_launch_date, status, created_at, updated_at FROM requirement_orders WHERE 1=1';
@@ -96,29 +85,23 @@ module.exports = function (app) {
       const departments = config.getCategory('department');
       const meetings = db.prepare('SELECT DISTINCT meeting_name FROM ccb_meetings ORDER BY meeting_name').all().map(m => m.meeting_name);
       res.json({ success: true, ...result, grouped, filters: { departments, meetings } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 需求单详情 ----
-  app.get('/api/orders/:id', (req, res) => {
-    try {
+  app.get('/api/orders/:id', wrap((req, res) => {
       const db = getDatabase();
       const order = db.prepare('SELECT * FROM requirement_orders WHERE id=?').get(req.params.id);
       if (!order) return res.status(404).json({ success: false });
       const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY id').all(req.params.id);
       const files = db.prepare('SELECT * FROM flow_files WHERE order_id=? AND deleted_at IS NULL ORDER BY id').all(req.params.id);
       const schedules = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=?`).all(req.params.id);
-      const pointsWithSchedule = points.map(p => {
-        const s = schedules.find(x => x.point_id === p.id);
-        return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null, meeting_date: s ? s.meeting_date : null, schedule_id: s ? s.id : null, meeting_id: s ? s.meeting_id : null, is_project: s ? s.is_project : 0, project_name: s ? s.project_name : null };
-      });
+      const schedByPoint = groupSchedulesByPoint(schedules);
+      const pointsWithSchedule = points.map(p => attachSchedules(p, schedByPoint));
       res.json({ success: true, data: { ...order, points: pointsWithSchedule, files, schedules } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 文件自动扫描 / 刷新关联 ----
-  app.get('/api/orders/:id/scan-files', (req, res) => {
-    try {
+  app.get('/api/orders/:id/scan-files', wrap(async (req, res) => {
       const db = getDatabase();
       const orderId = parseInt(req.params.id);
       const order = db.prepare('SELECT id, order_number FROM requirement_orders WHERE id=?').get(orderId);
@@ -151,7 +134,7 @@ module.exports = function (app) {
       // ---- 扫描服务单目录（任意文件类型、任意格式） ----
       const serviceDir = getServiceOrderDir();
       if (fs.existsSync(serviceDir)) {
-        for (const filePath of walkDir(serviceDir)) {
+        for (const filePath of await walkDirAsync(serviceDir)) {
           if (existing.has(path.resolve(filePath))) continue;
           const fileName = path.basename(filePath);
           const ext = path.extname(fileName).toLowerCase();
@@ -184,7 +167,7 @@ module.exports = function (app) {
       // ---- 扫描流转文件目录（仅 PDF，仅匹配指定文件类型） ----
       const flowDir = getFlowFileDir();
       if (fs.existsSync(flowDir)) {
-        for (const filePath of walkDir(flowDir)) {
+        for (const filePath of await walkDirAsync(flowDir)) {
           if (existing.has(path.resolve(filePath))) continue;
           const fileName = path.basename(filePath);
           const ext = path.extname(fileName).toLowerCase();
@@ -217,20 +200,16 @@ module.exports = function (app) {
         })();
       }
       res.json({ success: true, data: discovered, count, cleaned });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 编号唯一性检查 ----
-  app.get('/api/orders/check/:orderNumber', (req, res) => {
-    try {
+  app.get('/api/orders/check/:orderNumber', wrap((req, res) => {
       const db = getDatabase();
       res.json({ success: true, exists: !!db.prepare('SELECT id FROM requirement_orders WHERE order_number=?').get(req.params.orderNumber) });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 创建需求单 ----
-  app.post('/api/orders', (req, res) => {
-    try {
+  app.post('/api/orders', wrap((req, res) => {
       const db = getDatabase();
       const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
       if (!/^[A-Z]\d+$/.test(order_number)) return res.status(400).json({ success: false, message: '编号格式不正确（需大写字母开头+数字，如 A01）' });
@@ -239,12 +218,10 @@ module.exports = function (app) {
       const nd = normalizeDate(propose_date);
       const r = db.prepare('INSERT INTO requirement_orders (order_number,name,department,related_departments,proposer,propose_date,business_launch_date,background) VALUES (?,?,?,?,?,?,?,?)').run(order_number, name, department, rds, proposer, nd, business_launch_date, background);
       res.json({ success: true, data: { id: r.lastInsertRowid } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 更新需求单 ----
-  app.put('/api/orders/:id', (req, res) => {
-    try {
+  app.put('/api/orders/:id', wrap((req, res) => {
       const db = getDatabase();
       const { order_number, name, department, related_departments, proposer, propose_date, business_launch_date, background } = req.body;
       if (order_number) {
@@ -260,21 +237,17 @@ module.exports = function (app) {
         db.prepare("UPDATE requirement_orders SET name=?,department=?,related_departments=?,proposer=?,propose_date=?,business_launch_date=?,background=?,updated_at=datetime('now','localtime') WHERE id=?").run(name, department, rds, proposer, nd, business_launch_date, background, req.params.id);
       }
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 删除需求单 ----
-  app.delete('/api/orders/:id', (req, res) => {
-    try {
+  app.delete('/api/orders/:id', wrap((req, res) => {
       const db = getDatabase();
       db.prepare('DELETE FROM requirement_orders WHERE id=?').run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 需求点 ----
-  app.post('/api/orders/:orderId/points', (req, res) => {
-    try {
+  app.post('/api/orders/:orderId/points', wrap((req, res) => {
       const db = getDatabase();
       const { description, sub_batch } = req.body;
       const order = db.prepare('SELECT order_number FROM requirement_orders WHERE id=?').get(req.params.orderId);
@@ -285,29 +258,23 @@ module.exports = function (app) {
       const pointNumber = `${order.order_number}${String(seq).padStart(3, '0')}`;
       const r = db.prepare('INSERT INTO requirement_points (order_id,point_number,description,sub_batch) VALUES (?,?,?,?)').run(req.params.orderId, pointNumber, description, sub_batch || null);
       res.json({ success: true, data: { id: r.lastInsertRowid, point_number: pointNumber } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.put('/api/points/:id', (req, res) => {
-    try {
+  app.put('/api/points/:id', wrap((req, res) => {
       const db = getDatabase();
       const { description, sub_batch } = req.body;
       db.prepare("UPDATE requirement_points SET description=?, sub_batch=?, updated_at=datetime('now','localtime') WHERE id=?").run(description, sub_batch || null, req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.delete('/api/points/:id', (req, res) => {
-    try {
+  app.delete('/api/points/:id', wrap((req, res) => {
       const db = getDatabase();
       db.prepare('DELETE FROM requirement_points WHERE id=?').run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 搜索（保留在 orders 中，因为是对需求单的搜索） ----
-  app.get('/api/search', (req, res) => {
-    try {
+  app.get('/api/search', wrap((req, res) => {
       const db = getDatabase();
       const kw = req.query.keyword || '';
       if (!kw.trim()) return res.json({ success: true, data: [] });
@@ -327,27 +294,53 @@ module.exports = function (app) {
         if (!schedByOrder[s.order_id]) schedByOrder[s.order_id] = [];
         schedByOrder[s.order_id].push(s);
       }
+      const allSchedules = Object.values(schedByOrder).flat();
+      const schedByPoint = groupSchedulesByPoint(allSchedules);
       const result = orders.map(order => {
-        const schedules = schedByOrder[order.id] || [];
-        const matchedPoints = (pointsByOrder[order.id] || []).map(p => {
-          const s = schedules.find(x => x.point_id === p.id);
-          return { ...p, schedule_system: s ? s.system : p.system, schedule_version: s ? s.version : p.version, meeting_name: s ? s.meeting_name : null };
-        });
+        const matchedPoints = (pointsByOrder[order.id] || []).map(p => attachSchedules(p, schedByPoint));
         return { ...order, matchedPoints };
       });
       res.json({ success: true, data: result });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };
 
-// ---- 排期摘要（供 orders 路由内部使用） ----
+/** 按需求点归集排期，供详情与搜索复用 */
+function groupSchedulesByPoint(schedules) {
+  const map = new Map();
+  for (const s of schedules) {
+    if (!map.has(s.point_id)) map.set(s.point_id, []);
+    map.get(s.point_id).push(s);
+  }
+  return map;
+}
+
+/** 给需求点挂载全部排期；schedule_* 兼容字段仍取第一条 */
+function attachSchedules(point, byPoint) {
+  const list = byPoint.get(point.id) || [];
+  const s = list[0];
+  return {
+    ...point,
+    schedules: list,
+    schedule_system: s ? s.system : point.system,
+    schedule_version: s ? s.version : point.version,
+    meeting_name: s ? s.meeting_name : null,
+    meeting_date: s ? s.meeting_date : null,
+    schedule_id: s ? s.id : null,
+    meeting_id: s ? s.meeting_id : null,
+    is_project: s ? s.is_project : 0,
+    project_name: s ? s.project_name : null
+  };
+}
+
+// ---- 排期摘要：按需求点去重，避免一点多排期导致计数虚高 ----
 function getScheduleSummary(orderIds, db) {
   if (!orderIds.length) return {};
   const placeholders = orderIds.map(() => '?').join(',');
-  const rows = db.prepare(`SELECT rp.order_id, COUNT(*) as total,
-    SUM(CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END) as scheduled,
-    SUM(CASE WHEN cs.is_project THEN 1 ELSE 0 END) as project_count
+  const rows = db.prepare(`SELECT rp.order_id,
+    COUNT(DISTINCT rp.id) as total,
+    COUNT(DISTINCT cs.point_id) as scheduled,
+    COUNT(DISTINCT CASE WHEN cs.is_project=1 THEN cs.id END) as project_count
     FROM requirement_points rp LEFT JOIN ccb_schedules cs ON cs.point_id=rp.id
     WHERE rp.order_id IN (${placeholders}) GROUP BY rp.order_id`).all(...orderIds);
   const map = {};

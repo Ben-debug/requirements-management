@@ -4,6 +4,7 @@
 const path = require('path');
 const config = require('../config');
 const { AUTH_USER, SESSION_MAX_AGE_SECONDS, COOKIE_NAME, isAuthenticated, createSessionToken } = require('../middleware/auth');
+const { getRootDir } = require('../paths');
 
 // 登录失败锁定：同一 IP 连续失败 5 次后锁定 15 分钟
 const loginAttempts = new Map();
@@ -46,7 +47,7 @@ function validNewPassword(pwd, confirm) {
 }
 
 module.exports = function (app) {
-  const ROOT_DIR = path.join(__dirname, '..', '..');
+  const ROOT_DIR = getRootDir();
 
   // 登录页（认证中间件已放行）
   app.get('/login', (req, res) => res.sendFile(path.join(ROOT_DIR, 'public', 'login.html')));

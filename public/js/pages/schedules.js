@@ -475,7 +475,10 @@ async function batchGenerateAssessments() {
 
 async function loadScheduleFilter() {
   try {
-    const r = await fetch(`/api/schedules/filter?group_by=version&page=${state.schedulePage}&pageSize=20`);
+    const qs = new URLSearchParams({ page: state.schedulePage, pageSize: resolvePreference('schedules', 'pageSize') });
+    const initialGroup = resolvePreference('schedules', 'group_by');
+    if (initialGroup) qs.set('group_by', initialGroup);
+    const r = await fetch(`/api/schedules/filter?${qs}`);
     const result = await r.json();
     if (!result.success) throw new Error(result.message);
     fillFilter('filter-version', result.filters.versions, '全部版本');
@@ -496,10 +499,10 @@ async function applyFilter() {
   if (m) params.set('meeting_name', m);
   const s = document.getElementById('filter-system').value;
   if (s) params.set('system', s);
-  const g = document.getElementById('filter-group').value;
+  const g = document.getElementById('filter-group').value || resolvePreference('schedules', 'group_by');
   if (g) params.set('group_by', g);
   params.set('page', state.schedulePage);
-  params.set('pageSize', '20');
+  params.set('pageSize', resolvePreference('schedules', 'pageSize'));
   try {
     const r = await fetch(`/api/schedules/filter?${params}`);
     const result = await r.json();
@@ -520,13 +523,15 @@ function renderScheduleResults(result) {
   const pc = document.getElementById('schedules-pagination');
   if (!schedules || !schedules.length) { c.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>暂无匹配的排期信息</p></div>'; pc.innerHTML = ''; return; }
 
+  // 分组按当前页数据返回，因此汇总与占比统一用本页口径；total 仅用于说明整体规模
+  const pageCount = schedules.length;
   const projCount = schedules.filter(s => s.is_project).length;
-  const pct = total ? Math.round(projCount / total * 100) : 0;
-  c.innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#fafafa;border-radius:8px;margin-bottom:12px;border:1px solid #e8e8e8">
-    <span style="font-weight:600;font-size:14px;color:#333">📊 汇总</span>
-    <span style="font-size:13px;color:#666">共 <b>${total}</b> 条</span>
+  const pct = pageCount ? Math.round(projCount / pageCount * 100) : 0;
+  let html = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#fafafa;border-radius:8px;margin-bottom:12px;border:1px solid #e8e8e8">
+    <span style="font-weight:600;font-size:14px;color:#333">📊 汇总（本页口径）</span>
+    <span style="font-size:13px;color:#666">本页 <b>${pageCount}</b> 条 / 共 <b>${total}</b> 条</span>
     <span style="font-size:13px;color:#52c41a">📋 已立项 <b>${projCount}</b></span>
-    <span style="font-size:13px;color:#999">未立项 <b>${total - projCount}</b></span>
+    <span style="font-size:13px;color:#999">未立项 <b>${pageCount - projCount}</b></span>
     <div style="flex:1;min-width:100px;height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden">
       <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#52c41a,#73d13d);border-radius:4px;transition:width .3s"></div>
     </div>
@@ -534,16 +539,15 @@ function renderScheduleResults(result) {
   </div>`;
 
   if (grouped) {
-    let html = '';
     Object.keys(grouped).sort().forEach(key => {
       const items = grouped[key];
-      html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)} (${items.length}条)</div>`;
+      html += `<div style="margin:16px 0 8px;padding:8px 12px;background:#e6f7ff;border-radius:6px;font-weight:600;font-size:14px;color:#1890ff">📁 ${esc(key)}（本页 ${items.length} 条）</div>`;
       html += renderScheduleResultsGrouped(items);
     });
-    c.innerHTML = html;
   } else {
-    c.innerHTML = renderScheduleResultsGrouped(schedules);
+    html += renderScheduleResultsGrouped(schedules);
   }
+  c.innerHTML = html;
 
   if (totalPages > 1) {
     pc.innerHTML = `<button class="page-btn" onclick="gotoSchedulePage(1)" ${page <= 1 ? 'disabled' : ''}>«</button><button class="page-btn" onclick="gotoSchedulePage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>‹</button><span class="page-info">第 ${page}/${totalPages} 页 (共${total}条)</span><button class="page-btn" onclick="gotoSchedulePage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>›</button><button class="page-btn" onclick="gotoSchedulePage(${totalPages})" ${page >= totalPages ? 'disabled' : ''}>»</button>`;
@@ -556,4 +560,8 @@ function renderScheduleResultsGrouped(schedules) {
 
 function gotoSchedulePage(p) { state.schedulePage = p; applyFilter(); }
 
-document.getElementById('filter-group')?.addEventListener('change', () => { state.schedulePage = 1; applyFilter(); });
+document.getElementById('filter-group')?.addEventListener('change', e => {
+  savePreference('schedules', 'group_by', e.target.value);
+  state.schedulePage = 1;
+  applyFilter();
+});

@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { initDatabase } = require('./schema');
+const paths = require('./paths');
 
 let Database;
 if (process.pkg) {
@@ -13,12 +14,7 @@ if (process.pkg) {
 }
 
 // Determine data directory - next to executable for pkg, or in project root
-let DATA_DIR;
-if (process.pkg) {
-  DATA_DIR = path.join(path.dirname(process.execPath), 'data');
-} else {
-  DATA_DIR = path.join(__dirname, '..', 'data');
-}
+const DATA_DIR = paths.getDataDir();
 
 // Allow custom data dir from main server (set via initDataDir)
 let customDataDir = null;

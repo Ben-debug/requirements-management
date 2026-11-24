@@ -13,7 +13,7 @@ const defaults = {
   department_alias: [],
   project_alias: [],
   version_alias: [],
-  paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '', service_order_dir: '', spec_docs_dir: '' }
+  paths: { data_dir: '', flow_files_dir: '', meeting_files_dir: '', service_order_dir: '', spec_docs_dir: '', backup_dir: '' }
 };
 
 // 默认配置目录：项目 data/ 或 exe 同级 data/

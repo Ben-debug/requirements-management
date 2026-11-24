@@ -10,6 +10,7 @@ const fs = require('fs');
 const { initDataDir } = require('./database');
 const config = require('./config');
 const { errorHandler, fallbackHandler } = require('./middleware/error-handler');
+const paths = require('./paths');
 
 const app = express();
 const PORT = 3000;
@@ -19,9 +20,8 @@ const PORT = 3000;
 app.use(express.json());
 
 // ---- 目录路径解析 ----
-const ROOT_DIR = path.join(__dirname, '..');
-// pkg 环境下 __dirname 指向虚拟快照路径，需要物理路径用于文件上传和数据存储
-const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
+// pkg 环境下 __dirname 指向虚拟快照路径，根目录解析统一由 paths.js 处理
+const ROOT_DIR = paths.getRootDir();
 
 // ---- 自定义 data 目录初始化与数据迁移 ----
 const customDataDir = config.getPath('data_dir');
@@ -73,28 +73,12 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(ROOT_DIR, 'public', 'index.html'));
 });
 
-// ---- 上传目录辅助与初始化 ----
-function getFlowFileDir() {
-  const custom = config.getPath('flow_files_dir');
-  return custom || path.join(DATA_DIR, 'public', 'uploads', 'flow_files');
-}
-function getMeetingFileDir() {
-  const custom = config.getPath('meeting_files_dir');
-  return custom || path.join(DATA_DIR, 'public', 'uploads', 'meeting_files');
-}
-function getServiceOrderDir() {
-  const custom = config.getPath('service_order_dir');
-  return custom || path.join(DATA_DIR, 'public', 'uploads', 'service_orders');
-}
-function getSpecDocDir() {
-  const custom = config.getPath('spec_docs_dir');
-  return custom || path.join(DATA_DIR, 'public', 'uploads', 'spec_docs');
-}
-function getUploadBaseDir() {
-  return path.join(DATA_DIR, 'public', 'uploads');
-}
+// ---- 上传目录初始化（目录解析统一由 paths.js 提供）----
 function ensureUploadDirs() {
-  const dirs = [getUploadBaseDir(), getFlowFileDir(), getMeetingFileDir(), getServiceOrderDir(), getSpecDocDir()];
+  const dirs = [
+    paths.getUploadBaseDir(), paths.getFlowFileDir(), paths.getMeetingFileDir(),
+    paths.getServiceOrderDir(), paths.getSpecDocDir()
+  ];
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 }
 ensureUploadDirs();

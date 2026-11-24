@@ -48,8 +48,16 @@ async function doGlobalSearch(keyword) {
 
       if (o.matchedPoints && o.matchedPoints.length) {
         o.matchedPoints.forEach(p => {
-          const systems = p.schedule_system ? p.schedule_system.split(',').filter(Boolean) : [];
-          const scheduled = p.schedule_system ? '✅ ' + systems.map(s => esc(s.trim())).join(',') + ' | ' + esc(p.schedule_version || '') : '⏳ 待排期';
+          // 同一需求点可有多条排期，全部展示；旧数据按兼容字段回退为单条
+          const all = (p.schedules && p.schedules.length)
+            ? p.schedules
+            : (p.schedule_system ? [{ system: p.schedule_system, version: p.schedule_version }] : []);
+          const scheduled = all.length
+            ? all.map(s => {
+                const systems = (s.system || '').split(',').filter(Boolean);
+                return '✅ ' + systems.map(x => esc(x.trim())).join(',') + ' | ' + esc(s.version || '');
+              }).join('；')
+            : '⏳ 待排期';
           html += '<div class="search-dropdown-item" onclick="closeSearchAndView(' + o.id + ')">';
           html += '<div class="point-item"><span class="pt-num">' + esc(p.point_number) + '</span> ' + esc(p.description.substring(0, 60)) + (p.description.length > 60 ? '...' : '') + '</div>';
           html += '<div style="font-size:11px;color:#999;margin-top:2px">' + scheduled + '</div>';

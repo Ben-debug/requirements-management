@@ -8,15 +8,11 @@ const { getDatabase } = require('../database');
 const { createUploadMiddleware, removeTempFile } = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
+const { wrap } = require('../middleware/error-handler');
+const { getRootDir, getConfigDir, getUploadBaseDir } = require('../paths');
 
 module.exports = function (app) {
 
-  const ROOT_DIR = path.join(__dirname, '..', '..');
-  const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
-
-  function getUploadBaseDir() {
-    return path.join(DATA_DIR, 'public', 'uploads');
-  }
 
   // ---- 改名：历史数据精确替换（按逗号分隔的 token，避免子串误伤）----
   function splitTokens(raw) {
@@ -77,8 +73,7 @@ module.exports = function (app) {
   const { getTemplateDir, TEMPLATE_FILENAME } = wordGenerator;
 
   // ---- 路径配置 ----
-  app.get('/api/config/paths', (req, res) => {
-    try {
+  app.get('/api/config/paths', wrap((req, res) => {
       res.json({
         success: true, data: {
           data_dir: config.getPath('data_dir'),
@@ -86,21 +81,21 @@ module.exports = function (app) {
           meeting_files_dir: config.getPath('meeting_files_dir'),
           service_order_dir: config.getPath('service_order_dir'),
           spec_docs_dir: config.getPath('spec_docs_dir'),
+          backup_dir: config.getPath('backup_dir'),
           defaults: {
-            data_dir: DATA_DIR,
-            flow_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'flow_files'),
-            meeting_files_dir: path.join(DATA_DIR, 'public', 'uploads', 'meeting_files'),
-            service_order_dir: path.join(DATA_DIR, 'public', 'uploads', 'service_orders'),
-            spec_docs_dir: path.join(DATA_DIR, 'public', 'uploads', 'spec_docs')
+            data_dir: getRootDir(),
+            flow_files_dir: path.join(getUploadBaseDir(), 'flow_files'),
+            meeting_files_dir: path.join(getUploadBaseDir(), 'meeting_files'),
+            service_order_dir: path.join(getUploadBaseDir(), 'service_orders'),
+            spec_docs_dir: path.join(getUploadBaseDir(), 'spec_docs'),
+            backup_dir: path.join(getConfigDir(), 'backups')
           }
         }
       });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.post('/api/config/paths', (req, res) => {
-    try {
-      const { data_dir, flow_files_dir, meeting_files_dir, service_order_dir, spec_docs_dir } = req.body || {};
+  app.post('/api/config/paths', wrap((req, res) => {
+      const { data_dir, flow_files_dir, meeting_files_dir, service_order_dir, spec_docs_dir, backup_dir } = req.body || {};
       if (data_dir !== undefined) {
         config.setPath('data_dir', data_dir);
         if (data_dir) {
@@ -113,16 +108,15 @@ module.exports = function (app) {
       if (meeting_files_dir !== undefined) config.setPath('meeting_files_dir', meeting_files_dir);
       if (service_order_dir !== undefined) config.setPath('service_order_dir', service_order_dir);
       if (spec_docs_dir !== undefined) config.setPath('spec_docs_dir', spec_docs_dir);
-      [flow_files_dir, meeting_files_dir, service_order_dir, spec_docs_dir].forEach(d => {
+      if (backup_dir !== undefined) config.setPath('backup_dir', backup_dir);
+      [flow_files_dir, meeting_files_dir, service_order_dir, spec_docs_dir, backup_dir].forEach(d => {
         if (d && !fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
       });
       res.json({ success: true, message: '路径设置已保存，已立即生效' });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 目录浏览 ----
-  app.get('/api/config/browse', (req, res) => {
-    try {
+  app.get('/api/config/browse', wrap((req, res) => {
       let dirPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
       const resolvedPath = path.resolve(dirPath);
       if (resolvedPath.includes('node_modules')) return res.json({ success: true, data: { current: dirPath, parent: null, subdirs: [] } });
@@ -138,20 +132,16 @@ module.exports = function (app) {
         return path.dirname(resolved);
       })();
       res.json({ success: true, data: { current: path.resolve(dirPath), parent, subdirs } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 配置分类 CRUD ----
-  app.get('/api/config', (req, res) => {
-    try {
+  app.get('/api/config', wrap((req, res) => {
       const { auth, ...safe } = config.getAll();   // 不向前端暴露口令
       res.json({ success: true, data: safe, config_path: config.getConfigPath() });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // 部门/项目改名影响预览（只读，不写任何数据）
-  app.get('/api/config/:category/rename-impact', (req, res) => {
-    try {
+  app.get('/api/config/:category/rename-impact', wrap((req, res) => {
       const { category } = req.params;
       if (['department', 'project', 'version'].indexOf(category) === -1) {
         return res.status(400).json({ success: false, message: '该分类不支持改名预览' });
@@ -162,29 +152,23 @@ module.exports = function (app) {
         return res.status(400).json({ success: false, message: '该名称不在配置中' });
       }
       res.json({ success: true, data: collectRenameImpact(getDatabase(), category, label) });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.post('/api/config', (req, res) => {
-    try {
+  app.post('/api/config', wrap((req, res) => {
       const { category, label } = req.body;
       if (!category || !label) return res.status(400).json({ success: false, message: '不能为空' });
       if (category === 'auth') return res.status(400).json({ success: false, message: '访问口令请通过登录页或参数配置页修改' });
       config.addItem(category, label);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.delete('/api/config/:category/:label', (req, res) => {
-    try {
+  app.delete('/api/config/:category/:label', wrap((req, res) => {
       if (req.params.category === 'auth') return res.status(400).json({ success: false, message: '访问口令请通过参数配置页修改' });
       config.deleteItem(req.params.category, req.params.label); res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // 自定义排序：提交该项分类的完整、不重复顺序列表
-  app.put('/api/config/:category/order', (req, res) => {
-    try {
+  app.put('/api/config/:category/order', wrap((req, res) => {
       const cat = req.params.category;
       if (cat === 'auth' || cat === 'paths') return res.status(400).json({ success: false, message: '该分类不支持排序' });
       const labels = req.body && req.body.labels;
@@ -192,12 +176,10 @@ module.exports = function (app) {
         return res.status(400).json({ success: false, message: '排序内容无效：需提交当前所有条目的完整且不重复的顺序' });
       }
       res.json({ success: true, message: '顺序已保存' });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // 改名：系统别名只影响后续扫描；部门可选择是否同步更新历史引用，须放在 /order 路由之后
-  app.put('/api/config/:category/:label', (req, res) => {
-    try {
+  app.put('/api/config/:category/:label', wrap((req, res) => {
       const { category, label } = req.params;
       if (!config.isEditable(category)) {
         return res.status(400).json({ success: false, message: '该分类不支持改名（为避免历史数据引用失配）' });
@@ -226,20 +208,17 @@ module.exports = function (app) {
         ? `已改名并同步更新 ${history.total} 条历史记录`
         : (hasAlias ? '已改名，历史数据保留原名（旧名已作为匹配别名）' : '已修改（仅影响后续目录扫描）');
       res.json({ success: true, message, data: { history } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 意向书评估表模板管理 ----
-  app.get('/api/config/assessment-template', (req, res) => {
-    try {
+  app.get('/api/config/assessment-template', wrap((req, res) => {
       const templateDir = getTemplateDir();
       const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
       const exists = fs.existsSync(templatePath);
       res.json({ success: true, data: { exists, filename: TEMPLATE_FILENAME, path: templatePath } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
-  app.post('/api/config/assessment-template', uploadTemp.single('file'), (req, res) => {
+  app.post('/api/config/assessment-template', uploadTemp.single('file'), wrap((req, res) => {
     try {
       if (!req.file) return res.status(400).json({ success: false, message: '请选择 Word 模板文件' });
       const name = req.file.originalname || '';
@@ -252,12 +231,10 @@ module.exports = function (app) {
         return res.status(500).json({ success: false, message: '模板保存失败' });
       }
       res.json({ success: true, message: '模板上传成功' });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-    finally { removeTempFile(req); }
-  });
+    } finally { removeTempFile(req); }
+  }));
 
-  app.delete('/api/config/assessment-template', (req, res) => {
-    try {
+  app.delete('/api/config/assessment-template', wrap((req, res) => {
       const templateDir = getTemplateDir();
       const templatePath = path.join(templateDir, TEMPLATE_FILENAME);
       if (fs.existsSync(templatePath)) {
@@ -266,23 +243,18 @@ module.exports = function (app) {
       } else {
         res.json({ success: false, message: '模板不存在' });
       }
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // 参数路由必须放在所有 /api/config/* 静态路由之后，否则会遮蔽具体路径
-  app.get('/api/config/:category', (req, res) => {
-    try {
+  app.get('/api/config/:category', wrap((req, res) => {
       if (req.params.category === 'auth') return res.json({ success: true, data: [] });
       res.json({ success: true, data: config.getCategory(req.params.category) });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 升级日志 ----
-  app.get('/api/upgrade-logs', (req, res) => {
-    try {
+  app.get('/api/upgrade-logs', wrap((req, res) => {
       const db = getDatabase();
       res.json({ success: true, data: db.prepare('SELECT * FROM upgrade_logs ORDER BY created_at DESC').all() });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };

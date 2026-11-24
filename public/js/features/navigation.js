@@ -42,6 +42,7 @@ function switchDetailTab(tab) {
 // ---- Hash 路由 ----
 document.addEventListener('DOMContentLoaded', function () {
   const initPage = location.hash && location.hash.slice(1) || 'orders';
+  initPreferences();   // 先恢复排序/分组/每页条数，再触发首个列表请求
   loadDropdowns();
   navigate(initPage);
 });

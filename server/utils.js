@@ -6,6 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const paths = require('./paths');
 
 /** 数字补零 */
 function pad2(n) {
@@ -96,6 +97,24 @@ async function walkDirAsync(dir, maxDepth = 32) {
 }
 
 /**
+ * 在目录内生成不冲突的文件路径：name.ext → name(1).ext → name(2).ext …
+ * @param {string} dir 目标目录
+ * @param {string} fileName 初始候选文件名
+ * @param {string} [baseName] 冲突时用于加序号的基础文件名，默认与 fileName 相同
+ */
+function uniqueFilePath(dir, fileName, baseName = fileName) {
+  let candidate = path.join(dir, fileName);
+  if (!fs.existsSync(candidate)) return candidate;
+  const ext = path.extname(baseName);
+  const base = path.basename(baseName, ext);
+  let counter = 1;
+  do {
+    candidate = path.join(dir, `${base}(${counter++})${ext}`);
+  } while (fs.existsSync(candidate));
+  return candidate;
+}
+
+/**
  * 修正文件名编码（latin1 → utf8）
  */
 function encodeName(name) {
@@ -144,8 +163,7 @@ function isLocalClient(req) {
 /** 允许被「打开目录」访问的根目录，防止任意路径被打开 */
 function defaultAllowedRoots() {
   const config = require('./config');
-  const root = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
-  const roots = [path.join(root, 'public', 'uploads'), path.join(root, 'data')];
+  const roots = [paths.getUploadBaseDir(), paths.getDataDir()];
   for (const k of ['data_dir', 'flow_files_dir', 'meeting_files_dir', 'service_order_dir', 'spec_docs_dir']) {
     const v = config.getPath(k);
     if (v) roots.push(v);
@@ -216,7 +234,7 @@ function handleFileOpen(req, res, filePath, fileName) {
 }
 
 module.exports = {
-  pad2, normalizeDate, paginate, walkDir, walkDirAsync, encodeName,
+  pad2, normalizeDate, paginate, walkDir, walkDirAsync, uniqueFilePath, encodeName,
   PREVIEW_MIME, sendFileInline, isLocalClient, defaultAllowedRoots,
   revealInFolder, htmlEscape, sendFileMissing, handleFileOpen
 };

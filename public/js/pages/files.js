@@ -59,7 +59,7 @@ async function loadFiles() {
     const dt = document.getElementById('file-filter-date-to')?.value;
     if (dt) params.set('date_to', dt);
     params.set('page', filePage);
-    params.set('pageSize', 20);
+    params.set('pageSize', resolvePreference('files', 'pageSize'));
 
     const r = await fetch('/api/files?' + params.toString());
     const d = await r.json();
@@ -157,7 +157,11 @@ async function loadFiles() {
   } catch (e) { console.error(e); }
 }
 
-function applyFileFilter() { filePage = 1; loadFiles(); }
+function applyFileFilter() {
+  savePreference('files', 'group_by', document.getElementById('file-filter-group')?.value);
+  filePage = 1;
+  loadFiles();
+}
 function resetFileFilter() {
   document.getElementById('file-filter-keyword').value = '';
   document.getElementById('file-filter-department').value = '';
@@ -165,6 +169,7 @@ function resetFileFilter() {
   document.getElementById('file-filter-date-from').value = '';
   document.getElementById('file-filter-date-to').value = '';
   document.getElementById('file-filter-group').value = 'department';
+  savePreference('files', 'group_by', 'department');
   activeFileType = '';
   document.querySelectorAll('#page-files .tab-item[data-ft]').forEach(t => t.classList.toggle('active', t.getAttribute('data-ft') === ''));
   filePage = 1;

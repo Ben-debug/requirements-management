@@ -2,6 +2,8 @@ const path = require('path');
 const fs = require('fs');
 const JSZip = require('jszip');
 const config = require('./config');
+const paths = require('./paths');
+const { uniqueFilePath } = require('./utils');
 
 const TEMPLATE_FILENAME = '意向书评估表模板.docx';
 
@@ -109,14 +111,7 @@ async function generateAssessmentDoc(templatePath, outputPath, simpleData, multi
 
 /** 获取模板目录路径 */
 function getTemplateDir() {
-  const customDataDir = config.getPath('data_dir');
-  if (customDataDir) {
-    const dir = path.join(customDataDir, 'templates');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    return dir;
-  }
-  const rootDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
-  const base = process.pkg ? path.join(path.dirname(process.execPath), 'data') : path.join(rootDir, 'data');
+  const base = config.getPath('data_dir') || paths.getDataDir();
   const dir = path.join(base, 'templates');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -124,10 +119,7 @@ function getTemplateDir() {
 
 /** 获取流转文件目录路径 */
 function getFlowFileDir() {
-  const custom = config.getPath('flow_files_dir');
-  if (custom) return custom;
-  const rootDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
-  return path.join(rootDir, 'public', 'uploads', 'flow_files');
+  return paths.getFlowFileDir();
 }
 
 /**
@@ -199,13 +191,7 @@ async function generateAssessmentForOrder(orderId, meetingId, db) {
   const flowDir = getFlowFileDir();
   if (!fs.existsSync(flowDir)) fs.mkdirSync(flowDir, { recursive: true });
 
-  let destPath = path.join(flowDir, outputFileName);
-  let counter = 1;
-  while (fs.existsSync(destPath)) {
-    const ext = path.extname(outputFileName);
-    const base = path.basename(outputFileName, ext);
-    destPath = path.join(flowDir, `${base}(${counter++})${ext}`);
-  }
+  const destPath = uniqueFilePath(flowDir, outputFileName);
 
   await generateAssessmentDoc(templatePath, destPath, data, pointDescriptions);
 

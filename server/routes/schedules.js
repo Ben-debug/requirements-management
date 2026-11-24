@@ -5,12 +5,12 @@
 const { getDatabase } = require('../database');
 const config = require('../config');
 const { paginate } = require('../utils');
+const { wrap } = require('../middleware/error-handler');
 
 module.exports = function (app) {
 
   // ---- 批量排期 ----
-  app.post('/api/meetings/:meetingId/schedules/batch', (req, res) => {
-    try {
+  app.post('/api/meetings/:meetingId/schedules/batch', wrap((req, res) => {
       const db = getDatabase();
       const { schedules } = req.body;
       if (!schedules || !schedules.length) return res.status(400).json({ success: false, message: '请选择排期' });
@@ -26,24 +26,20 @@ module.exports = function (app) {
         });
       })();
       res.json({ success: true, data: { count: schedules.length } });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 单条排期 ----
-  app.post('/api/meetings/:meetingId/schedules', (req, res) => {
-    try {
+  app.post('/api/meetings/:meetingId/schedules', wrap((req, res) => {
       const db = getDatabase();
       const { order_id, point_id, system, version, is_project, project_name } = req.body;
       const isProject = is_project || 0;
       db.prepare('INSERT INTO ccb_schedules (meeting_id,order_id,point_id,system,version,is_project,project_name) VALUES (?,?,?,?,?,?,?)').run(req.params.meetingId, order_id, point_id, system, version, isProject, isProject ? (project_name || null) : null);
       db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, point_id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 修改排期 ----
-  app.put('/api/schedules/:id', (req, res) => {
-    try {
+  app.put('/api/schedules/:id', wrap((req, res) => {
       const db = getDatabase();
       const { system, version, meeting_id, is_project, project_name } = req.body;
       const schedule = db.prepare('SELECT * FROM ccb_schedules WHERE id=?').get(req.params.id);
@@ -58,23 +54,19 @@ module.exports = function (app) {
       }
       db.prepare('UPDATE requirement_points SET system=?, version=? WHERE id=?').run(system, version, schedule.point_id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 移除排期 ----
-  app.delete('/api/schedules/:id', (req, res) => {
-    try {
+  app.delete('/api/schedules/:id', wrap((req, res) => {
       const db = getDatabase();
       const s = db.prepare('SELECT * FROM ccb_schedules WHERE id=?').get(req.params.id);
       if (s) db.prepare('UPDATE requirement_points SET system=NULL, version=NULL WHERE id=?').run(s.point_id);
       db.prepare('DELETE FROM ccb_schedules WHERE id=?').run(req.params.id);
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 待排期需求点（部门筛选 + 分页，按需加载）----
-  app.get('/api/unscheduled-points', (req, res) => {
-    try {
+  app.get('/api/unscheduled-points', wrap((req, res) => {
       const db = getDatabase();
       const { department, page = 1, pageSize = 50 } = req.query;
       const where = 'rp.id NOT IN (SELECT point_id FROM ccb_schedules)';
@@ -108,12 +100,10 @@ module.exports = function (app) {
         allCount: Object.values(departmentCounts).reduce((a, b) => a + b, 0),
         filters: { departments }
       });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 排期筛选查询 ----
-  app.get('/api/schedules/filter', (req, res) => {
-    try {
+  app.get('/api/schedules/filter', wrap((req, res) => {
       const db = getDatabase();
       const { version, department, meeting_name, system, group_by, page = 1, pageSize = 20 } = req.query;
 
@@ -156,7 +146,6 @@ module.exports = function (app) {
         totalPages: Math.ceil(total / ps), grouped,
         filters: { versions: allVersions, departments: allDepartments, meetings: allMeetings.map(m => m.meeting_name), systems: allSystems }
       });
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
 };

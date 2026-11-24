@@ -455,14 +455,16 @@ function specQueryRow(item) {
 async function loadSpecQuery(page) {
   if (page !== undefined) specQueryPage = page;
   const pageSize = parseInt(document.getElementById('sq-page-size')?.value, 10) || 20;
-  const group = document.getElementById('sq-group')?.value || '';
+  // 下拉未渲染时（首页仅一页）回退到偏好值，避免每页条数被重置
+  const effectivePageSize = document.getElementById('sq-page-size') ? pageSize : resolvePreference('specs', 'pageSize');
+  const group = document.getElementById('sq-group')?.value || resolvePreference('specs', 'group_by');
   const version = document.getElementById('sq-version')?.value || '';
   const system = document.getElementById('sq-system')?.value || '';
   const department = document.getElementById('sq-department')?.value || '';
   const project = document.getElementById('sq-project')?.value || '';
   const keyword = document.getElementById('sq-keyword')?.value || '';
 
-  const params = new URLSearchParams({ page: specQueryPage, pageSize });
+  const params = new URLSearchParams({ page: specQueryPage, pageSize: effectivePageSize });
   if (group) params.set('group_by', group);
   if (version) params.set('version', version);
   if (system) params.set('system', system);
@@ -476,9 +478,13 @@ async function loadSpecQuery(page) {
 
   const tbody = document.getElementById('sq-results');
   const info = document.getElementById('sq-result-info');
-  if (info) info.textContent = d.total > 0 ? `共 ${d.total} 条结果` : '';
+  // 服务端按当前页分组，结果信息同时给出本页与总数，避免与分组标题口径混淆
+  if (info) info.textContent = d.total > 0 ? `本页 ${(d.items || []).length} 条 / 共 ${d.total} 条结果` : '';
   // 接入全站共享分页器（自带每页条数下拉，仅在多页时渲染）
   renderPagination('sq-pagination', d, 'loadSpecQuery', 'sq-page-size');
+  document.getElementById('sq-pagination')?.querySelector('select')?.addEventListener('change', e => {
+    savePreference('specs', 'pageSize', e.target.value);
+  });
 
   if (!d.items || !d.items.length) {
     tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">🔍</div><p>暂未找到匹配的需规文档</p></div></td></tr>';
@@ -491,7 +497,7 @@ async function loadSpecQuery(page) {
     Object.keys(d.grouped).sort().forEach(key => {
       const label = (group === 'archive_category' && SPEC_CATEGORY_LABELS[key]) ? SPEC_CATEGORY_LABELS[key] : key;
       const items = d.grouped[key];
-      html += `<tr class="group-header"><td colspan="7" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff;background:#e6f7ff">🏷️ ${esc(label)}（${items.length} 份）</td></tr>`;
+      html += `<tr class="group-header"><td colspan="7" style="padding:8px 12px;font-weight:600;font-size:14px;color:#1890ff;background:#e6f7ff">🏷️ ${esc(label)}（本页 ${items.length} 份）</td></tr>`;
       html += items.map(specQueryRow).join('');
     });
   } else {
@@ -499,3 +505,7 @@ async function loadSpecQuery(page) {
   }
   tbody.innerHTML = html;
 }
+
+document.getElementById('sq-group')?.addEventListener('change', e => {
+  savePreference('specs', 'group_by', e.target.value);
+});

@@ -5,27 +5,28 @@
 const { getDatabase } = require('../database');
 const config = require('../config');
 const { normalizeDate } = require('../utils');
+const { wrap } = require('../middleware/error-handler');
 const { createUploadMiddleware } = require('../middleware/upload');
 const xlsx = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { getUploadBaseDir } = require('../paths');
+
+/** 并发安全的临时文件名：时间戳 + 随机串，避免同一时刻的下载互相覆盖或误删 */
+function tempFileName(prefix, ext) {
+  return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
+}
 
 module.exports = function (app) {
 
-  const ROOT_DIR = path.join(__dirname, '..', '..');
-  const DATA_DIR = process.pkg ? path.dirname(process.execPath) : ROOT_DIR;
-
-  function getUploadBaseDir() {
-    return path.join(DATA_DIR, 'public', 'uploads');
-  }
 
   const uploadTemp = createUploadMiddleware(getUploadBaseDir());
 
   // ==================== 导出 ====================
 
   // ---- 筛选导出 ----
-  app.get('/api/export/filtered', (req, res) => {
-    try {
+  app.get('/api/export/filtered', wrap((req, res) => {
       const db = getDatabase();
       const { department, keyword, date_from, date_to, is_project, meeting_name } = req.query;
       let sql = 'SELECT * FROM requirement_orders WHERE 1=1';
@@ -50,17 +51,14 @@ module.exports = function (app) {
       sql += ' ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)';
       const orders = db.prepare(sql).all(...params);
       exportOrdersToExcel(orders, res);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 全部导出 ----
-  app.get('/api/export', (req, res) => {
-    try {
+  app.get('/api/export', wrap((req, res) => {
       const db = getDatabase();
       const orders = db.prepare('SELECT * FROM requirement_orders ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)').all();
       exportOrdersToExcel(orders, res);
-    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-  });
+  }));
 
   // ---- 导入模板下载 ----
   app.get('/api/import/template', (req, res) => {
@@ -72,7 +70,7 @@ module.exports = function (app) {
         ['A01', '', '', '', '', '', '', '', '功能二 | 功能三', '交易系统 | 清算系统', 'v1.0 | v2.0', '', '', '', '否'],
       ]);
       xlsx.utils.book_append_sheet(wb, ws, '需求单');
-      const tmpPath = path.join(getUploadBaseDir(), 'template_' + Date.now() + '.xlsx');
+      const tmpPath = path.join(getUploadBaseDir(), tempFileName('template', '.xlsx'));
       xlsx.writeFile(wb, tmpPath);
       res.download(tmpPath, '需求单导入模板.xlsx', () => { try { fs.unlinkSync(tmpPath); } catch (e) {} });
     } catch (err) { res.status(500).json({ success: false, message: '模板生成失败：' + err.message }); }
@@ -223,12 +221,37 @@ module.exports = function (app) {
     return String(n).padStart(2, '0');
   }
 
+  /** 按 id 列表分块查询，避免 IN 参数过多触发 SQLite 变量上限；SQL 中用 __IDS__ 占位 */
+  function selectByIn(db, sql, ids, chunkSize = 500) {
+    const rows = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      rows.push(...db.prepare(sql.replace('__IDS__', placeholders)).all(...chunk));
+    }
+    return rows;
+  }
+
   function exportOrdersToExcel(orders, res) {
     const db = getDatabase();
     const wb = xlsx.utils.book_new();
     const rows = [];
+
+    // 批量预加载需求点与排期，取代逐单/逐点查询
+    const pointsByOrder = new Map();
+    for (const p of selectByIn(db, 'SELECT * FROM requirement_points WHERE order_id IN (__IDS__) ORDER BY order_id, point_number', orders.map(o => o.id))) {
+      if (!pointsByOrder.has(p.order_id)) pointsByOrder.set(p.order_id, []);
+      pointsByOrder.get(p.order_id).push(p);
+    }
+    const allPoints = [...pointsByOrder.values()].flat();
+    const schedByPoint = new Map();
+    for (const s of selectByIn(db, `SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id IN (__IDS__) ORDER BY cs.point_id, cs.id`, allPoints.map(p => p.id))) {
+      // 与原先的单条查询一致：一个需求点只取第一条排期
+      if (!schedByPoint.has(s.point_id)) schedByPoint.set(s.point_id, s);
+    }
+
     for (const o of orders) {
-      const points = db.prepare('SELECT * FROM requirement_points WHERE order_id=? ORDER BY point_number').all(o.id);
+      const points = pointsByOrder.get(o.id) || [];
       const projCols = { '是否立项': '' };
       if (points.length === 0) {
         rows.push(Object.assign({
@@ -238,7 +261,7 @@ module.exports = function (app) {
         }, projCols));
       } else {
         for (const p of points) {
-          const sche = db.prepare(`SELECT cs.*, cm.meeting_name, cm.meeting_date FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.point_id=?`).get(p.id);
+          const sche = schedByPoint.get(p.id);
           rows.push(Object.assign({
             '需求单编号': o.order_number, '需求单名称': o.name, '业务部门': o.department || '', '关联部门': o.related_departments || '',
             '提出人': o.proposer || '', '提出日期': o.propose_date || '', '提出背景': o.background || '', '业务上线预期': o.business_launch_date || '',
@@ -253,10 +276,11 @@ module.exports = function (app) {
     xlsx.utils.book_append_sheet(wb, ws, '需求单信息');
     const now = new Date();
     const dateStr = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`;
-    const fileName = `需求单信息-${dateStr}.xlsx`;
-    const fp = path.join(getUploadBaseDir(), fileName);
+    // 磁盘名唯一，避免并发导出互相覆盖；下载时仍使用用户熟悉的中文文件名
+    const displayName = `需求单信息-${dateStr}.xlsx`;
+    const fp = path.join(getUploadBaseDir(), tempFileName('export', '.xlsx'));
     xlsx.writeFile(wb, fp);
-    res.download(fp, fileName, err => {
+    res.download(fp, displayName, err => {
       if (err) console.error(err);
       setTimeout(() => { try { fs.unlinkSync(fp); } catch (e) {} }, 5000);
     });

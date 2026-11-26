@@ -7,6 +7,11 @@ function fillSelect(id, items, placeholder) {
   items.forEach(i => { const o = document.createElement('option'); o.value = i; o.textContent = i; el.appendChild(o); });
 }
 
+/** 会议展示文案：兜底会议 '-' 只显示标识，不显示占位日期 */
+function formatMeetingLabel(name, date) {
+  return name === '-' ? '-（未开会排期）' : `${name} (${date || ''})`;
+}
+
 /** 渲染系统多选复选框 */
 function renderSystemCheckboxes(containerId, systems, selectedArr) {
   const container = document.getElementById(containerId); if (!container) return;

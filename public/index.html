@@ -596,8 +596,13 @@
 </div></div>
 
 <!-- Point Modal -->
-<div id="point-modal" class="modal-overlay"><div class="modal">
-  <div class="modal-header"><h3 id="point-modal-title">添加需求点</h3><button class="modal-close" onclick="closeModal('point-modal')">×</button></div>
+<div id="point-modal" class="modal-overlay"><div class="modal modal-point">
+  <div class="modal-header"><h3 id="point-modal-title">添加需求点</h3>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button type="button" class="btn btn-sm" id="point-expand-btn" onclick="togglePointEditorExpand()" title="放大编辑区，便于编辑长文本">⤢ 放大编辑</button>
+      <button class="modal-close" onclick="closeModal('point-modal')">×</button>
+    </div>
+  </div>
   <form id="point-form"><div class="modal-body">
     <div class="form-group" id="point-batch-group">
       <label>子单批次号
@@ -608,7 +613,7 @@
         <span id="point-batch-preview" style="font-size:13px;color:#999"></span>
       </div>
     </div>
-    <div class="form-group"><label>描述 <span class="required">*</span></label><textarea id="point-description" name="description" class="form-control" required></textarea></div>
+    <div class="form-group point-desc-group"><label>描述 <span class="required">*</span><span id="point-desc-count" class="point-desc-count">0 字 · 1 行</span></label><textarea id="point-description" name="description" class="form-control" required placeholder="可分行填写多条要求；内容较长时点击右上角「放大编辑」"></textarea></div>
   </div>
   <div class="modal-footer"><button type="button" class="btn" onclick="closeModal('point-modal')">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form>
 </div></div>
@@ -826,27 +831,27 @@
 
 <footer class="app-footer">
   <div class="footer-content">
-    <span>我的工作平台 v2.3.6</span>
+    <span>我的工作平台 v2.4.0</span>
     <span>创作者：Yu by AI</span>
-    <span>发布日期：2026-11-24</span>
+    <span>发布日期：2026-11-26</span>
   </div>
   <div class="footer-note">🔒 本地部署 · 数据仅存本机 · 不联网</div>
   <div class="security-notice">严禁处理涉密信息</div>
 </footer>
-<script src="/js/api.js?v=2.3.6"></script>
-<script src="/js/components.js?v=2.3.6"></script>
-<script src="/js/features/renderers.js?v=2.3.6"></script>
-<script src="/js/features/preferences.js?v=2.3.6"></script>
-<script src="/js/features/navigation.js?v=2.3.6"></script>
-<script src="/js/pages/config.js?v=2.3.6"></script>
-<script src="/js/pages/orders.js?v=2.3.6"></script>
-<script src="/js/pages/meetings.js?v=2.3.6"></script>
-<script src="/js/pages/schedules.js?v=2.3.6"></script>
-<script src="/js/pages/files.js?v=2.3.6"></script>
-<script src="/js/pages/specs.js?v=2.3.6"></script>
-<script src="/js/pages/ledgers.js?v=2.3.6"></script>
-<script src="/js/features/search.js?v=2.3.6"></script>
-<script src="/js/features/import-export.js?v=2.3.6"></script>
-<script src="/js/app.js?v=2.3.6"></script>
+<script src="/js/api.js?v=2.4.0"></script>
+<script src="/js/components.js?v=2.4.0"></script>
+<script src="/js/features/renderers.js?v=2.4.0"></script>
+<script src="/js/features/preferences.js?v=2.4.0"></script>
+<script src="/js/features/navigation.js?v=2.4.0"></script>
+<script src="/js/pages/config.js?v=2.4.0"></script>
+<script src="/js/pages/orders.js?v=2.4.0"></script>
+<script src="/js/pages/meetings.js?v=2.4.0"></script>
+<script src="/js/pages/schedules.js?v=2.4.0"></script>
+<script src="/js/pages/files.js?v=2.4.0"></script>
+<script src="/js/pages/specs.js?v=2.4.0"></script>
+<script src="/js/pages/ledgers.js?v=2.4.0"></script>
+<script src="/js/features/search.js?v=2.4.0"></script>
+<script src="/js/features/import-export.js?v=2.4.0"></script>
+<script src="/js/app.js?v=2.4.0"></script>
 </body>
 </html>

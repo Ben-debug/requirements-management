@@ -69,7 +69,7 @@ function renderScheduledCard(s, opts) {
     <div class="sched-header">
       <div class="sched-title">${esc(s.point_number)}${batchTag}</div>
       ${opts.showActions ? `<div class="action-group"><button class="btn btn-sm" onclick="openEditScheduleModalFromMeeting(${s.id})">修改</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromMeeting(${s.id})">移除</button></div>` : ''}
-      ${opts.showMeeting ? `<div style="font-size:12px;color:#888">${esc(s.meeting_name)} (${s.meeting_date})</div>` : ''}
+      ${opts.showMeeting ? `<div style="font-size:12px;color:#888">${esc(formatMeetingLabel(s.meeting_name, s.meeting_date))}</div>` : ''}
     </div>
     <div class="sched-meta">${esc(s.point_description).replace(/\n/g, '<br>')}</div>
     ${opts.showDepartment && s.department ? `<div class="sched-meta">部门: ${esc(s.department)}</div>` : ''}

@@ -312,12 +312,12 @@ async function createProjectFor(selectId) {
 
 // ---- 单条排期 ----
 async function showScheduleModal(pointId, orderId) {
-  const [s, v, m, p] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings'), api('/api/config/project')]);
+  const [s, v, m, p] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings?include_fallback=1'), api('/api/config/project')]);
   const sys = s.data, vers = v.data, meetings = m.data;
   if (!meetings.length) { showToast('请先创建CCB会议', 'error'); navigate('meetings'); return; }
   const mtgSelect = document.getElementById('detail-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">请选择CCB会议</option>';
-  meetings.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.meeting_name} (${m.meeting_date})`; mtgSelect.appendChild(o); });
+  meetings.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = formatMeetingLabel(m.meeting_name, m.meeting_date); mtgSelect.appendChild(o); });
   renderSystemCheckboxes('detail-schedule-systems', sys, []);
   fillSelect('detail-schedule-version', vers, '请选择版本');
   document.getElementById('detail-schedule-is-project').checked = false;
@@ -354,7 +354,7 @@ async function confirmQuickSchedule() {
 // ---- 修改排期 ----
 async function openEditScheduleModal(scheduleId, orderId) {
   const [s, v, meetings, orderData, p] = await Promise.all([
-    api('/api/config/system'), api('/api/config/version'), api('/api/meetings'),
+    api('/api/config/system'), api('/api/config/version'), api('/api/meetings?include_fallback=1'),
     orderId ? api(`/api/orders/${orderId}`) : Promise.resolve(null),
     api('/api/config/project')
   ]);
@@ -382,7 +382,7 @@ async function openEditScheduleModal(scheduleId, orderId) {
   const mtgSelect = document.getElementById('edit-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">不修改会议</option>';
   meetings.data.forEach(m => {
-    const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.meeting_name} (${m.meeting_date})`;
+    const o = document.createElement('option'); o.value = m.id; o.textContent = formatMeetingLabel(m.meeting_name, m.meeting_date);
     if (m.id === currentMeetingId) o.selected = true;
     mtgSelect.appendChild(o);
   });
@@ -437,12 +437,12 @@ async function openEditScheduleModalFromMeeting(scheduleId) {
   const currentSystems = schedule ? schedule.system.split(',').map(s => s.trim()).filter(Boolean) : [];
   const currentVersion = schedule ? schedule.version : '';
 
-  const [sys, vers, meetings] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings')]);
+  const [sys, vers, meetings] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings?include_fallback=1')]);
 
   const mtgSelect = document.getElementById('edit-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">不修改会议</option>';
   meetings.data.forEach(m => {
-    const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.meeting_name} (${m.meeting_date})`;
+    const o = document.createElement('option'); o.value = m.id; o.textContent = formatMeetingLabel(m.meeting_name, m.meeting_date);
     if (m.id === schedule?.meeting_id) o.selected = true;
     mtgSelect.appendChild(o);
   });

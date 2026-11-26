@@ -15,8 +15,10 @@ module.exports = function (app) {
   // ---- 会议列表（支持筛选 + 分页；不传分页参数时仍返回全量，兼容各页面下拉）----
   app.get('/api/meetings', wrap((req, res) => {
       const db = getDatabase();
-      const { keyword, ccb_only, date_from, date_to, page, pageSize } = req.query;
+      const { keyword, ccb_only, date_from, date_to, page, pageSize, include_fallback } = req.query;
       const where = [], params = [];
+      // 兜底会议默认不在管理列表展示；下拉/筛选显式传 include_fallback=1 才包含
+      if (include_fallback !== '1' && include_fallback !== 'true') where.push('COALESCE(is_fallback,0)=0');
       if (keyword) {
         where.push('(meeting_name LIKE ? OR notes LIKE ?)');
         const k = `%${keyword}%`; params.push(k, k);
@@ -68,6 +70,9 @@ module.exports = function (app) {
   // ---- 创建会议 ----
   app.post('/api/meetings', wrap((req, res) => {
       const db = getDatabase();
+      if (String(req.body.meeting_name || '').trim() === '-') {
+        return res.status(400).json({ success: false, message: '“-”为系统兜底会议，不能新建' });
+      }
       const r = db.prepare('INSERT INTO ccb_meetings (meeting_name,meeting_date,notes) VALUES (?,?,?)').run(req.body.meeting_name, req.body.meeting_date, req.body.notes);
       res.json({ success: true, data: { id: r.lastInsertRowid } });
   }));
@@ -75,6 +80,12 @@ module.exports = function (app) {
   // ---- 更新会议 ----
   app.put('/api/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
+      const m = db.prepare('SELECT is_fallback FROM ccb_meetings WHERE id=?').get(req.params.id);
+      if (!m) return res.status(404).json({ success: false });
+      if (m.is_fallback) return res.status(400).json({ success: false, message: '兜底会议不能修改' });
+      if (String(req.body.meeting_name || '').trim() === '-') {
+        return res.status(400).json({ success: false, message: '“-”为系统兜底会议，不能作为会议名' });
+      }
       db.prepare('UPDATE ccb_meetings SET meeting_name=?, meeting_date=?, notes=? WHERE id=?').run(req.body.meeting_name, req.body.meeting_date, req.body.notes, req.params.id);
       res.json({ success: true });
   }));
@@ -82,6 +93,10 @@ module.exports = function (app) {
   // ---- 删除会议 ----
   app.delete('/api/meetings/:id', wrap((req, res) => {
       const db = getDatabase();
+      const m = db.prepare('SELECT is_fallback FROM ccb_meetings WHERE id=?').get(req.params.id);
+      if (!m) return res.status(404).json({ success: false });
+      // 兜底会议被删除会级联清掉所有无会议排期
+      if (m.is_fallback) return res.status(400).json({ success: false, message: '兜底会议不能删除' });
       db.prepare('DELETE FROM ccb_meetings WHERE id=?').run(req.params.id);
       res.json({ success: true });
   }));

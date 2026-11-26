@@ -111,7 +111,9 @@ module.exports = function (app) {
       const params = [];
       if (version) { sql += ' AND cs.version=?'; params.push(version); }
       if (department) { sql += ' AND ro.department=?'; params.push(department); }
-      if (meeting_name) { sql += ' AND cm.meeting_name LIKE ?'; params.push(`%${meeting_name}%`); }
+      // 兜底会议名就是 '-'，必须用精确匹配，否则 LIKE '%-' 会命中所有含连字符的会议
+      if (meeting_name === '-') { sql += " AND cm.meeting_name = '-'"; }
+      else if (meeting_name) { sql += ' AND cm.meeting_name LIKE ?'; params.push(`%${meeting_name}%`); }
       if (system) { sql += ' AND cs.system LIKE ?'; params.push(`%${system}%`); }
       sql += ' ORDER BY cm.meeting_date DESC';
 

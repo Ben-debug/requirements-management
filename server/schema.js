@@ -99,6 +99,20 @@ function initDatabase(db) {
   } catch (e) {}
   try { db.exec("ALTER TABLE flow_files ADD COLUMN deleted_at TEXT"); } catch (e) {}
 
+  // 无会议排期兜底：用一条真实的“会议”记录承载未开会直接排期的需求点，
+  // 这样所有 JOIN ccb_meetings 的既有查询（筛选、详情、导出、文档生成）无需特殊分支
+  try { db.exec("ALTER TABLE ccb_meetings ADD COLUMN is_fallback INTEGER DEFAULT 0"); } catch (e) {}
+  try {
+    if (!db.prepare('SELECT 1 FROM ccb_meetings WHERE is_fallback=1').get()) {
+      const existing = db.prepare("SELECT id FROM ccb_meetings WHERE meeting_name='-'").get();
+      if (existing) {
+        db.prepare('UPDATE ccb_meetings SET is_fallback=1 WHERE id=?').run(existing.id);
+      } else {
+        db.prepare("INSERT INTO ccb_meetings (meeting_name,meeting_date,notes,is_fallback) VALUES ('-','1900-01-01','未开会排期兜底',1)").run();
+      }
+    }
+  } catch (e) {}
+
   // 高频筛选与关联字段索引：放在列迁移之后，旧库首次启动自动补齐
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_ro_department ON requirement_orders(department);

@@ -41,8 +41,10 @@ module.exports = function (app) {
         sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id)";
       }
       if (meeting_name) {
-        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name LIKE ?)";
-        params.push(`%${meeting_name}%`);
+        // 兜底会议名 '-' 用精确匹配，避免 LIKE '%-' 命中所有含连字符的会议
+        const exactFallback = meeting_name === '-';
+        sql += ` AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name ${exactFallback ? "= '-'" : 'LIKE ?'})`;
+        if (!exactFallback) params.push(`%${meeting_name}%`);
       }
       // 排序白名单
       const sortFields = { 'created_at': 'created_at', 'order_number': 'order_number', 'propose_date': 'propose_date', 'department': 'department', 'name': 'name' };

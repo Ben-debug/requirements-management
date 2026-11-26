@@ -2147,6 +2147,172 @@ test('AF. 导航菜单配置', '前端导航项、配置 UI 与显隐逻辑已�
   assert.ok(cfg.includes('async function loadNavModules') && cfg.includes('async function saveNavModules'));
 });
 
+// ==================================================================
+// AG. 需求点复制与编辑
+// ==================================================================
+const pointPageSrc = () => fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'orders.js'), 'utf8');
+
+test('AG. 需求点复制与编辑', '需求点详情逐点提供复制按钮且保留描述换行', () => {
+  const vm = require('vm');
+  const ctx = { esc: s => String(s == null ? '' : s), document: { getElementById: () => null } };
+  vm.runInNewContext(pointPageSrc(), ctx);
+  const html = ctx.renderPointItem({ id: 7, point_number: 'A01001', description: '第一行\n第二行', sub_batch: '' }, 3);
+  assert.ok(html.includes('onclick="copyPointDesc(7)"'), '应提供逐点复制按钮');
+  assert.ok(html.includes('第一行<br>第二行'), '描述换行应正常展示');
+  assert.ok(html.includes('onclick="editPoint(7,3)"'), '原有编辑入口应保留');
+});
+
+test('AG. 需求点复制与编辑', 'copyPointDesc 复制当前需求点描述原文并按结果提示', async () => {
+  const vm = require('vm');
+  let copied = '', toast = null;
+  const ctx = {
+    esc: s => String(s == null ? '' : s),
+    document: { getElementById: () => null },
+    state: { currentOrder: { points: [{ id: 7, description: '第一条\n第二条' }] } },
+    copyText: async t => { copied = t; return true; },
+    showToast: (msg, type) => { toast = { msg, type }; }
+  };
+  vm.runInNewContext(pointPageSrc(), ctx);
+  await ctx.copyPointDesc(7);
+  assert.equal(copied, '第一条\n第二条', '应复制不含 HTML 的描述原文');
+  assert.deepEqual(toast, { msg: '已复制该需求点内容', type: 'success' });
+  await ctx.copyPointDesc(999);
+  assert.equal(copied, '第一条\n第二条', '空内容不应触发复制');
+  ctx.copyText = async () => false;
+  await ctx.copyPointDesc(7);
+  assert.equal(toast.type, 'error', '复制失败应提示错误');
+});
+
+test('AG. 需求点复制与编辑', '长文本自适应高度、字数统计与放大切换可用', () => {
+  const vm = require('vm');
+  const ta = { value: 'line\n'.repeat(30), style: {}, focus() { this.focused = true; }, addEventListener() {} };
+  const counter = { textContent: '' };
+  const btn = { textContent: '', title: '' };
+  const classes = new Set();
+  const modal = { classList: {
+    toggle(c) { if (classes.has(c)) { classes.delete(c); return false; } classes.add(c); return true; },
+    remove(c) { classes.delete(c); },
+    contains(c) { return classes.has(c); }
+  } };
+  const ctx = {
+    esc: s => String(s == null ? '' : s),
+    document: {
+      getElementById: id => id === 'point-description' ? ta : (id === 'point-desc-count' ? counter : (id === 'point-expand-btn' ? btn : null)),
+      querySelector: () => modal
+    }
+  };
+  vm.runInNewContext(pointPageSrc(), ctx);
+  ctx.fitPointEditor(ta.value);
+  assert.equal(ta.style.height, '520px', '多行内容应自动增高且有上限');
+  assert.match(counter.textContent, /31 行/, '应显示行数');
+  ctx.togglePointEditorExpand();
+  assert.ok(classes.has('point-editor-expanded'));
+  assert.equal(btn.textContent, '⤡ 还原窗口');
+  assert.ok(ta.focused, '放大后应聚焦编辑框');
+  ctx.togglePointEditorExpand();
+  assert.ok(!classes.has('point-editor-expanded'));
+  assert.equal(btn.textContent, '⤢ 放大编辑');
+});
+
+test('AG. 需求点复制与编辑', '编辑弹窗、全局函数与放大样式已接入', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'js', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'public', 'css', 'style.css'), 'utf8');
+  const modal = html.slice(html.indexOf('id="point-modal"'), html.indexOf('<!-- Quick Schedule Modal -->'));
+  assert.ok(modal.includes('class="modal modal-point"'), '编辑弹窗应使用专属宽版样式');
+  assert.ok(modal.includes('id="point-expand-btn"'));
+  assert.ok(modal.includes('id="point-desc-count"'));
+  for (const fn of ['copyPointDesc', 'togglePointEditorExpand', 'updatePointDescCount']) {
+    assert.ok(app.includes(`window.${fn} = ${fn}`), `缺少全局函数 ${fn}`);
+  }
+  assert.ok(css.includes('.modal-point.point-editor-expanded'), '缺少放大编辑样式');
+});
+
+test('AG. 需求点复制与编辑', 'copyText 在局域网 http 非安全上下文回退 execCommand', async () => {
+  const vm = require('vm');
+  let copied = null;
+  const ta = { style: {}, focus() {}, select() {}, remove() {}, setAttribute() {}, set value(v) { copied = v; } };
+  const ctx = {
+    window: { isSecureContext: false, fetch: () => Promise.resolve() },
+    navigator: {}, location: { pathname: '/' }, console,
+    document: {
+      activeElement: null, createElement: () => ta, body: { appendChild() {} },
+      execCommand: () => true, querySelectorAll: () => [], getElementById: () => null
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'public', 'js', 'api.js'), 'utf8'), ctx);
+  assert.equal(await ctx.copyText('hello'), true);
+  assert.equal(copied, 'hello');
+});
+
+// ==================================================================
+// AH. 兜底会议（无会议排期）
+// ==================================================================
+async function getFallbackMeeting() {
+  const all = (await call('/api/meetings?include_fallback=1')).json().data;
+  return all.find(m => m.meeting_name === '-');
+}
+
+test('AH. 兜底会议', '启动自动创建兜底会议，管理列表默认隐藏', async () => {
+  const fb = await getFallbackMeeting();
+  assert.ok(fb, '应自动创建名称为 - 的兜底会议');
+  assert.equal(fb.is_fallback, 1);
+  assert.equal(fb.meeting_date, '1900-01-01');
+  const list = (await call('/api/meetings')).json().data;
+  assert.ok(!list.some(m => m.id === fb.id), '兜底会议不应出现在管理列表');
+});
+
+test('AH. 兜底会议', '兜底会议不可新建、改名或删除', async () => {
+  const fb = await getFallbackMeeting();
+  const create = await call('/api/meetings', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ meeting_name: '-', meeting_date: '2026-01-01' }) });
+  assert.equal(create.status, 400);
+  const edit = await call('/api/meetings/' + fb.id, { method: 'PUT', headers: jsonHeaders,
+    body: JSON.stringify({ meeting_name: '-', meeting_date: '2026-01-01', notes: '修改尝试' }) });
+  assert.equal(edit.status, 400);
+  const del = await call('/api/meetings/' + fb.id, { method: 'DELETE' });
+  assert.equal(del.status, 400);
+  assert.ok(await getFallbackMeeting(), '兜底会议应仍然存在');
+});
+
+test('AH. 兜底会议', '需求点可排入兜底会议且筛选 "-" 精确命中', async () => {
+  const fb = await getFallbackMeeting();
+  const o = await call('/api/orders', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ order_number: 'F01', name: '无会议排期需求', department: '交易中心' }) });
+  assert.equal(o.json().success, true);
+  const oid = o.json().data.id;
+  const p = await call('/api/orders/' + oid + '/points', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ description: '未开会直接排期' }) });
+  const pid = p.json().data.id;
+  const s = await call('/api/meetings/' + fb.id + '/schedules', { method: 'POST', headers: jsonHeaders,
+    body: JSON.stringify({ order_id: oid, point_id: pid, system: '交易系统', version: 'v1' }) });
+  assert.equal(s.json().success, true);
+
+  const f = (await call('/api/schedules/filter?meeting_name=-')).json();
+  assert.ok(f.data.some(x => x.point_id === pid), '兜底排期应被检出');
+  assert.ok(f.data.every(x => x.meeting_name === '-'), '筛选 "-" 不应命中含连字符的其它会议');
+  const ol = (await call('/api/orders?meeting_name=-')).json();
+  assert.ok(ol.items.some(x => x.id === oid), '需求单列表按 "-" 筛选应命中');
+  assert.equal((await call('/api/export/filtered?meeting_name=-')).status, 200, '导出按 "-" 筛选应可用');
+});
+
+test('AH. 兜底会议', '重复初始化不会生成重复兜底记录', () => {
+  require('../server/schema.js').initDatabase(db);
+  const rows = db.prepare("SELECT id FROM ccb_meetings WHERE meeting_name='-' OR is_fallback=1").all();
+  assert.equal(rows.length, 1);
+});
+
+test('AH. 兜底会议', '前端下拉与展示已接入兜底会议', () => {
+  const sch = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'schedules.js'), 'utf8');
+  const ord = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'orders.js'), 'utf8');
+  const comp = fs.readFileSync(path.join(ROOT, 'public', 'js', 'components.js'), 'utf8');
+  const ren = fs.readFileSync(path.join(ROOT, 'public', 'js', 'features', 'renderers.js'), 'utf8');
+  assert.ok((sch.match(/include_fallback=1/g) || []).length >= 3, '排期页 3 处下拉应含兜底会议');
+  assert.ok(ord.includes('include_fallback=1'), '整批排期下拉应含兜底会议');
+  assert.ok(comp.includes("name === '-' ? '-（未开会排期）'"), '缺少统一展示文案');
+  assert.ok(ren.includes('formatMeetingLabel') && ord.includes('formatMeetingLabel'));
+});
+
 // ------------------------------------------------------------------
 (async () => {
   let passed = 0, failed = 0;

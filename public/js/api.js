@@ -41,6 +41,31 @@ function showToast(msg, type='info') {
   setTimeout(() => t.remove(), 3000);
 }
 
+/** 复制文本：优先 Clipboard API；局域网 http 非安全上下文回退 execCommand */
+async function copyText(text) {
+  text = String(text == null ? '' : text);
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* 回退到 execCommand */ }
+  try {
+    const active = document.activeElement;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (active && active.focus) active.focus();
+    return ok;
+  } catch (e) { return false; }
+}
+
 /** 退出登录 */
 async function logout() {
   try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}

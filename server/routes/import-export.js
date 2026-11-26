@@ -45,8 +45,10 @@ module.exports = function (app) {
         sql += " AND NOT EXISTS (SELECT 1 FROM ccb_schedules cs JOIN requirement_points rp ON cs.point_id=rp.id WHERE rp.order_id=requirement_orders.id AND cs.is_project=1)";
       }
       if (meeting_name) {
-        sql += " AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name LIKE ?)";
-        params.push(`%${meeting_name}%`);
+        // 兜底会议名 '-' 用精确匹配，避免 LIKE '%-' 命中所有含连字符的会议
+        const exactFallback = meeting_name === '-';
+        sql += ` AND EXISTS (SELECT 1 FROM ccb_schedules cs JOIN ccb_meetings cm ON cs.meeting_id=cm.id WHERE cs.order_id=requirement_orders.id AND cm.meeting_name ${exactFallback ? "= '-'" : 'LIKE ?'})`;
+        if (!exactFallback) params.push(`%${meeting_name}%`);
       }
       sql += ' ORDER BY SUBSTR(order_number, 1, 1), CAST(SUBSTR(order_number, 2) AS INTEGER)';
       const orders = db.prepare(sql).all(...params);
@@ -267,7 +269,8 @@ module.exports = function (app) {
             '提出人': o.proposer || '', '提出日期': o.propose_date || '', '提出背景': o.background || '', '业务上线预期': o.business_launch_date || '',
             '需求点编号': p.point_number, '需求点描述': p.description,
             '涉及系统': sche ? sche.system : (p.system || ''), '上线版本': sche ? sche.version : (p.version || ''),
-            'CCB会议': sche ? sche.meeting_name : '', '排期日期': sche ? sche.meeting_date : ''
+            'CCB会议': sche ? sche.meeting_name : '',
+            '排期日期': sche ? (sche.meeting_name === '-' ? '' : sche.meeting_date) : ''
           }, { '是否立项': sche ? (sche.is_project ? '是' : '否') : '' }));
         }
       }

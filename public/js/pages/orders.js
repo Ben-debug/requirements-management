@@ -403,7 +403,7 @@ function renderPointItem(p, oid) {
         const systems = (s.system || '').split(',').filter(Boolean);
         const label = all.length > 1 ? `<span style="color:#999">[${i + 1}/${all.length}]</span> ` : '';
         return `<div class="point-meta">${label}<span style="color:#52c41a">✅ ${systems.map(x => esc(x.trim())).join(', ')} | ${esc(s.version || '')}</span>`
-          + (s.meeting_name ? ` | 📅 ${esc(s.meeting_name)} (${esc(s.meeting_date || '')})` : '')
+          + (s.meeting_name ? ` | 📅 ${esc(formatMeetingLabel(s.meeting_name, s.meeting_date || ''))}` : '')
           + (s.is_project ? ` | <span style="color:#fa8c16">📋 项目：${esc(s.project_name || '未指定')}</span>` : '')
           + `</div>`;
       }).join('')
@@ -416,6 +416,7 @@ function renderPointItem(p, oid) {
       ${schedHtml}
     </div>
     <div class="point-actions">
+      <button class="btn btn-sm" onclick="copyPointDesc(${p.id})" title="复制该需求点描述原文（保留换行）">📋 复制</button>
       <button class="btn btn-sm" onclick="editPoint(${p.id},${oid})">编辑</button>
       ${!has ? `<button class="btn btn-sm btn-success" onclick="showScheduleModal(${p.id},${oid})">排期</button>`
         : all.map(s => `<button class="btn btn-sm" onclick="openEditScheduleModal(${s.id},${oid})">修改排期</button><button class="btn btn-sm btn-danger" onclick="deleteScheduleFromDetail(${s.id})">移除排期</button>`).join('')}
@@ -431,6 +432,53 @@ function togglePointDesc(descId) {
   const btn = el.parentElement.querySelector('.desc-toggle-btn');
   if (isClamped) { el.classList.remove('point-desc-clamped'); if (btn) btn.textContent = '收起 ▲'; }
   else { el.classList.add('point-desc-clamped'); if (btn) btn.textContent = '展开全文 ▼'; }
+}
+
+// ---- 需求点内容复制 ----
+async function copyPointDesc(id) {
+  const p = (state.currentOrder?.points || []).find(x => x.id === id);
+  const desc = p ? (p.description || '') : '';
+  if (!desc) { showToast('该需求点暂无内容可复制', 'info'); return; }
+  const ok = await copyText(desc);
+  showToast(ok ? '已复制该需求点内容' : '复制失败，请手动选择文本复制', ok ? 'success' : 'error');
+}
+
+// ---- 需求点编辑：长文本自适应与放大 ----
+function updatePointDescCount() {
+  const ta = document.getElementById('point-description');
+  const counter = document.getElementById('point-desc-count');
+  if (!ta || !counter) return;
+  const v = ta.value || '';
+  counter.textContent = `${v.length} 字 · ${v.split('\n').length} 行`;
+}
+
+function fitPointEditor(text) {
+  const ta = document.getElementById('point-description');
+  if (!ta) return;
+  const lines = String(text == null ? '' : text).split('\n').length;
+  ta.style.height = Math.min(520, Math.max(220, lines * 24 + 40)) + 'px';
+  updatePointDescCount();
+}
+
+function resetPointEditor() {
+  const modal = document.querySelector('#point-modal .modal');
+  const btn = document.getElementById('point-expand-btn');
+  modal?.classList.remove('point-editor-expanded');
+  if (btn) { btn.textContent = '⤢ 放大编辑'; btn.title = '放大编辑区，便于编辑长文本'; }
+}
+
+function togglePointEditorExpand() {
+  const modal = document.querySelector('#point-modal .modal');
+  const btn = document.getElementById('point-expand-btn');
+  const ta = document.getElementById('point-description');
+  if (!modal) return;
+  const expanded = modal.classList.toggle('point-editor-expanded');
+  if (btn) {
+    btn.textContent = expanded ? '⤡ 还原窗口' : '⤢ 放大编辑';
+    btn.title = expanded ? '还原为普通编辑窗口' : '放大编辑区，便于编辑长文本';
+  }
+  if (expanded) { if (ta) ta.focus(); }
+  else fitPointEditor(ta ? ta.value : '');
 }
 
 // ---- 需求点表单提交 ----
@@ -455,6 +503,13 @@ document.getElementById('point-form')?.addEventListener('submit', async e => {
   } catch (e) {}
 });
 
+// 输入时同步字数统计与输入框高度（放大模式下高度由 CSS 撑满）
+document.getElementById('point-description')?.addEventListener('input', e => {
+  const modal = document.querySelector('#point-modal .modal');
+  if (modal?.classList.contains('point-editor-expanded')) updatePointDescCount();
+  else fitPointEditor(e.target.value);
+});
+
 function showAddPoint() {
   state.editingPointId = null;
   document.getElementById('point-modal-title').textContent = '添加需求点';
@@ -462,7 +517,10 @@ function showAddPoint() {
   document.getElementById('point-batch-group').style.display = 'block';
   document.getElementById('point-sub-batch').value = '';
   document.getElementById('point-batch-preview').textContent = '';
+  resetPointEditor();
+  fitPointEditor('');
   openModal('point-modal');
+  document.getElementById('point-description').focus();
 }
 
 async function editPoint(id, oid) {
@@ -475,7 +533,10 @@ async function editPoint(id, oid) {
   document.getElementById('point-batch-group').style.display = 'block';
   document.getElementById('point-sub-batch').value = p.sub_batch || '';
   updatePointBatchPreview();
+  resetPointEditor();
+  fitPointEditor(p.description);
   openModal('point-modal');
+  document.getElementById('point-description').focus();
 }
 
 async function deletePoint(id) {
@@ -549,12 +610,12 @@ async function batchScheduleSubOrder(orderId, batch) {
   const unscheduled = points.filter(p => !(p.schedule_system || p.schedule_id));
   if (!unscheduled.length) { showToast('该批次已全部排期', 'info'); return; }
 
-  const [s, v, meetings] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings')]);
+  const [s, v, meetings] = await Promise.all([api('/api/config/system'), api('/api/config/version'), api('/api/meetings?include_fallback=1')]);
   if (!meetings.data.length) { showToast('请先创建CCB会议', 'error'); navigate('meetings'); return; }
 
   const mtgSelect = document.getElementById('batch-schedule-meeting');
   mtgSelect.innerHTML = '<option value="">请选择CCB会议</option>';
-  meetings.data.forEach(m => { const o2 = document.createElement('option'); o2.value = m.id; o2.textContent = m.meeting_name + ' (' + m.meeting_date + ')'; mtgSelect.appendChild(o2); });
+  meetings.data.forEach(m => { const o2 = document.createElement('option'); o2.value = m.id; o2.textContent = formatMeetingLabel(m.meeting_name, m.meeting_date); mtgSelect.appendChild(o2); });
 
   const container = document.getElementById('batch-schedule-points');
   container.innerHTML = '';
